@@ -1865,6 +1865,19 @@ describe("ae_screen_replace", () => {
     await refuses(base("trk_sr_10", { range: { start: 9, end: 10 } }), fakeAe(), /No frame of the track is ok/, "bad_args");
   });
 
+  it("cuts the insert to its keys when the track did not solve the last frames (a plate whipping out of frame)", async () => {
+    // Frames 0.4 and 0.5 not solved: the layer would hold the 0.3 key over a surface that is gone.
+    const t = trackOf([0, 1, 2, 3, 4, 5].map((k) => ({ t: k / 10, H: rotH(0, 1, k * 4, k) })), { track_id: "trk_sr_trim" });
+    t.frames = t.frames.map((f) => (f.time > 0.35 ? { ...f, ok: false, H: null } : f));
+    saveTrack(t);
+    const { out, ae } = await run(base("trk_sr_trim", { match_look: false, contact_sheet: false }));
+    expect(out.ok).toBe(true);
+    const wr = ae.calls.find((c) => c.fn === "screenrepApply")!.args;
+    expect(wr.times).toEqual([0, 0.1, 0.2, 0.3]);
+    expect(wr.trim_to_keys).toBe(true);
+    expect(out.notes.join(" ")).toMatch(/after 0\.3 s \(2 frames\).*cut to its keys/);
+  });
+
   it("writes only the track frames in the range", async () => {
     storeTrack("trk_sr_11");
     const { out, ae } = await run(base("trk_sr_11", { range: { start: 0.2, end: 0.4 }, match_look: false, contact_sheet: false }));

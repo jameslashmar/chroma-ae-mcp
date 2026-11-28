@@ -2040,6 +2040,22 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
   if (keys.skipped.length > 0) notes.push(`${keys.skipped.length} frame(s) were not written (degenerate for this screen); the keys interpolate across them.`);
   const notOk = based.frames.filter((f) => !f.ok || !f.H).length;
   if (notOk > 0) notes.push(`${notOk} frame(s) of the track are not solved and were skipped; the keys interpolate across them.`);
+  // Frames before the first key or after the last that the track did not solve: there the layer would hold the
+  // nearest key, an insert left floating where the surface is not (a licence plate whipping out of frame). The
+  // layer is cut to its keys instead, and the plate shows there.
+  const firstKey = keys.times[0];
+  const lastKey = keys.times[keys.times.length - 1];
+  const lead = based.frames.filter((f) => f.time < firstKey - 1e-6 && (!args.range || f.time >= args.range.start - 1e-6) && (!f.ok || !f.H));
+  const trail = based.frames.filter((f) => f.time > lastKey + 1e-6 && (!args.range || f.time <= args.range.end + 1e-6) && (!f.ok || !f.H));
+  const trimEnds = lead.length > 0 || trail.length > 0;
+  if (trimEnds) {
+    const parts: string[] = [];
+    if (lead.length) parts.push(`before ${r2(firstKey)} s (${lead.length} frame${lead.length === 1 ? "" : "s"})`);
+    if (trail.length) parts.push(`after ${r2(lastKey)} s (${trail.length} frame${trail.length === 1 ? "" : "s"})`);
+    notes.push(
+      `The track did not solve the screen ${parts.join(" or ")}, so the insert layer is cut to its keys (${r2(firstKey)}-${r2(lastKey)} s) and the plate shows there instead of an insert held where the surface is not. Track those frames (a bigger area on the same plane, or ae_track_multi with continue_track_id) and write them with \`range\`, or extend the layer by hand if holding is right.`
+    );
+  }
   if (args.motion_blur === "transform_pin" && based.model !== "translate" && based.model !== "similarity") {
     notes.push(`The ${based.model} track was split into a similarity on the layer transform (largest corner deviation ${keys.max_fit_px} px) and the rest in the pin.`);
   }
@@ -2103,7 +2119,7 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
         insert: args.insert.item_id !== undefined ? { item_id: args.insert.item_id } : { layer: { index: item.from_layer!.index, id: item.from_layer!.id } },
         insert_size: insertSize,
         insert_start: plan.insertStart,
-        ...(args.range ? { trim_to_keys: true } : {}),
+        ...(args.range || trimEnds ? { trim_to_keys: true } : {}),
         ...(info.plate ? { plate: { index: info.plate.index, id: info.plate.id } } : {}),
         pin: args.pin,
         expansion_pct: args.expansion_pct,

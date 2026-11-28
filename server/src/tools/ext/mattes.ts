@@ -1163,9 +1163,8 @@ async function garbageMatte(ctx: ToolContext, args: AeGarbageMatteArgs): Promise
       if (!l.found) throw new PlanarError("not_found", l.message ?? "A target layer was not found.");
     }
     if (args.matte_layer && !pre.matte) throw new PlanarError("not_found", "The matte layer was not found.");
-    if (Number(pre.comp.pixel_aspect) > 0 && Math.abs(Number(pre.comp.pixel_aspect) - 1) > 1e-6 && args.track) {
-      throw new PlanarError("refused", `The comp's pixel aspect is ${pre.comp.pixel_aspect}, not 1. Planar tracking works on square pixels only.`);
-    }
+    // Non-square comp pixels need nothing here: the matte is a new comp-size solid of the comp's own pixel aspect at
+    // its default place, so its pixels are comp pixels and the tracked mask (in comp pixels) is drawn as it is.
     const out = {
       pre,
       times: [] as number[],

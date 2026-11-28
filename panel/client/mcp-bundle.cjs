@@ -58828,9 +58828,6 @@ async function garbageMatte(ctx, args) {
       if (!l.found) throw new PlanarError("not_found", l.message ?? "A target layer was not found.");
     }
     if (args.matte_layer && !pre.matte) throw new PlanarError("not_found", "The matte layer was not found.");
-    if (Number(pre.comp.pixel_aspect) > 0 && Math.abs(Number(pre.comp.pixel_aspect) - 1) > 1e-6 && args.track) {
-      throw new PlanarError("refused", `The comp's pixel aspect is ${pre.comp.pixel_aspect}, not 1. Planar tracking works on square pixels only.`);
-    }
     const out = {
       pre,
       times: [],
@@ -62509,13 +62506,26 @@ async function screenReplace(ctx, args) {
   if (keys.skipped.length > 0) notes.push(`${keys.skipped.length} frame(s) were not written (degenerate for this screen); the keys interpolate across them.`);
   const notOk = based.frames.filter((f) => !f.ok || !f.H).length;
   if (notOk > 0) notes.push(`${notOk} frame(s) of the track are not solved and were skipped; the keys interpolate across them.`);
+  const firstKey = keys.times[0];
+  const lastKey = keys.times[keys.times.length - 1];
+  const lead = based.frames.filter((f) => f.time < firstKey - 1e-6 && (!args.range || f.time >= args.range.start - 1e-6) && (!f.ok || !f.H));
+  const trail = based.frames.filter((f) => f.time > lastKey + 1e-6 && (!args.range || f.time <= args.range.end + 1e-6) && (!f.ok || !f.H));
+  const trimEnds = lead.length > 0 || trail.length > 0;
+  if (trimEnds) {
+    const parts = [];
+    if (lead.length) parts.push(`before ${r213(firstKey)} s (${lead.length} frame${lead.length === 1 ? "" : "s"})`);
+    if (trail.length) parts.push(`after ${r213(lastKey)} s (${trail.length} frame${trail.length === 1 ? "" : "s"})`);
+    notes.push(
+      `The track did not solve the screen ${parts.join(" or ")}, so the insert layer is cut to its keys (${r213(firstKey)}-${r213(lastKey)} s) and the plate shows there instead of an insert held where the surface is not. Track those frames (a bigger area on the same plane, or ae_track_multi with continue_track_id) and write them with \`range\`, or extend the layer by hand if holding is right.`
+    );
+  }
   if (args.motion_blur === "transform_pin" && based.model !== "translate" && based.model !== "similarity") {
     notes.push(`The ${based.model} track was split into a similarity on the layer transform (largest corner deviation ${keys.max_fit_px} px) and the rest in the pin.`);
   }
   if (args.motion_blur === "none") notes.push("Corner Pin and CC Power Pin animation gets no layer motion blur: pass motion_blur transform_pin or force if the shot has motion blur.");
   if (item.kind === "footage" && item.duration > 0) {
-    const lastKey = keys.times[keys.times.length - 1];
-    if ((args.insert_start ?? 0) + item.duration < lastKey) notes.push(`The insert is ${r213(item.duration)} s long and ends before the last key (${r213(lastKey)} s): the screen goes empty after it. Loop or extend it.`);
+    const lastKey2 = keys.times[keys.times.length - 1];
+    if ((args.insert_start ?? 0) + item.duration < lastKey2) notes.push(`The insert is ${r213(item.duration)} s long and ends before the last key (${r213(lastKey2)} s): the screen goes empty after it. Loop or extend it.`);
   }
   if ((args.insert_start ?? 0) > keys.times[0] + 1e-6) notes.push(`insert_start (${r213(args.insert_start ?? 0)} s) is after the first key (${r213(keys.times[0])} s): the old screen shows until then, because the insert layer starts at insert_start.`);
   if (args.range) notes.push(`This call made its own insert comp and layer, cut to its range (${r213(keys.times[0])}-${r213(keys.times[keys.times.length - 1])} s). Existing insert layers are not extended, so a further range makes another layer and the old screen shows in any gap.`);
@@ -62568,7 +62578,7 @@ async function screenReplace(ctx, args) {
         insert: args.insert.item_id !== void 0 ? { item_id: args.insert.item_id } : { layer: { index: item.from_layer.index, id: item.from_layer.id } },
         insert_size: insertSize,
         insert_start: plan2.insertStart,
-        ...args.range ? { trim_to_keys: true } : {},
+        ...args.range || trimEnds ? { trim_to_keys: true } : {},
         ...info.plate ? { plate: { index: info.plate.index, id: info.plate.id } } : {},
         pin: args.pin,
         expansion_pct: args.expansion_pct,
