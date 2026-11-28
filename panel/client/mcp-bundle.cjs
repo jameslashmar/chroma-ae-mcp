@@ -45798,6 +45798,228 @@ var init_planar_math = __esm({
   }
 });
 
+// src/tools/ext/path-check.ts
+function localFit(f, v, rob, half) {
+  const n = f.length;
+  const out = new Float64Array(n);
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < n; i++) {
+    while (lo < n && f[lo] < f[i] - 2 * half) lo++;
+    while (hi < n - 1 && f[hi + 1] <= f[i] + 2 * half) hi++;
+    let before = 0;
+    let after = 0;
+    for (let j = lo; j <= hi; j++) {
+      const d = f[j] - f[i];
+      if (d < 0 && d >= -half && rob[j] > 0) before++;
+      if (d > 0 && d <= half && rob[j] > 0) after++;
+    }
+    const oneSided = before === 0 || after === 0;
+    const reach = oneSided ? 2 * half : half;
+    let s0 = 0;
+    let s1 = 0;
+    let s2 = 0;
+    let s3 = 0;
+    let s4 = 0;
+    let t0 = 0;
+    let t1 = 0;
+    let t2 = 0;
+    for (let j = lo; j <= hi; j++) {
+      const d = f[j] - f[i];
+      const a = Math.abs(d) / (reach + 1);
+      if (a >= 1) continue;
+      const w = (1 - a * a * a) ** 3 * rob[j];
+      if (!(w > 0)) continue;
+      const d2 = d * d;
+      s0 += w;
+      s1 += w * d;
+      s2 += w * d2;
+      s3 += w * d2 * d;
+      s4 += w * d2 * d2;
+      t0 += w * v[j];
+      t1 += w * v[j] * d;
+      t2 += w * v[j] * d2;
+    }
+    if (!(s0 > 0)) {
+      out[i] = v[i];
+      continue;
+    }
+    if (!oneSided) {
+      const det = s0 * (s2 * s4 - s3 * s3) - s1 * (s1 * s4 - s3 * s2) + s2 * (s1 * s3 - s2 * s2);
+      if (Math.abs(det) > 1e-9 * Math.max(1, s0 * s2 * s4)) {
+        out[i] = (t0 * (s2 * s4 - s3 * s3) - s1 * (t1 * s4 - s3 * t2) + s2 * (t1 * s3 - s2 * t2)) / det;
+        continue;
+      }
+    }
+    const det2 = s0 * s2 - s1 * s1;
+    out[i] = Math.abs(det2) > 1e-9 * Math.max(1, s0 * s2) ? (t0 * s2 - s1 * t1) / det2 : t0 / s0;
+  }
+  return out;
+}
+function runningMedian(f, v, half) {
+  const n = f.length;
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const h = Math.min(half, f[i] - f[0], f[n - 1] - f[i]);
+    const win = [];
+    for (let j = i; j >= 0 && f[j] >= f[i] - h; j--) win.push(v[j]);
+    for (let j = i + 1; j < n && f[j] <= f[i] + h; j++) win.push(v[j]);
+    out[i] = median4(win);
+  }
+  return out;
+}
+function robustPath(f, xs, ys, half, fromMedian, floorPx) {
+  const n = f.length;
+  const rob = new Float64Array(n).fill(1);
+  let fx;
+  let fy;
+  if (fromMedian) {
+    fx = runningMedian(f, xs, half);
+    fy = runningMedian(f, ys, half);
+  } else {
+    fx = localFit(f, xs, rob, half);
+    fy = localFit(f, ys, rob, half);
+  }
+  const res = new Float64Array(n);
+  for (let round6 = 0; round6 < 4; round6++) {
+    for (let i = 0; i < n; i++) res[i] = Math.hypot(xs[i] - fx[i], ys[i] - fy[i]);
+    const m = Math.max(floorPx, median4(Array.from(res)));
+    const c = 6 * m;
+    for (let i = 0; i < n; i++) {
+      const u = res[i] / c;
+      rob[i] = u < 1 ? (1 - u * u) ** 2 : 0;
+    }
+    fx = localFit(f, xs, rob, half);
+    fy = localFit(f, ys, rob, half);
+  }
+  for (let i = 0; i < n; i++) res[i] = Math.hypot(xs[i] - fx[i], ys[i] - fy[i]);
+  return { x: fx, y: fy, res };
+}
+function checkPaths(samples, opts = {}) {
+  const s = samples.filter((x) => x.points.length > 0 && x.points.every((p) => p && Number.isFinite(p[0]) && Number.isFinite(p[1]))).sort((a, b) => a.frame - b.frame);
+  if (s.length < 9) return null;
+  const nPts = s[0].points.length;
+  if (s.some((x) => x.points.length !== nPts)) return null;
+  const shapeHalf = Math.max(3, Math.round(opts.shapeHalf ?? 12));
+  const wholeHalf = Math.max(2, Math.round(opts.wholeHalf ?? 6));
+  const k = Math.max(1, (opts.compHeight ?? 1080) / 1080);
+  const f = s.map((x) => x.frame);
+  const n = s.length;
+  const cx = s.map((x) => x.points.reduce((t, p) => t + p[0], 0) / nPts);
+  const cy = s.map((x) => x.points.reduce((t, p) => t + p[1], 0) / nPts);
+  const whole = robustPath(f, cx, cy, wholeHalf, false, 0.05 * k);
+  const jump = [];
+  const off = [];
+  if (nPts > 2) {
+    const ref3 = s[0].points;
+    const rcx = ref3.reduce((t, p) => t + p[0], 0) / nPts;
+    const rcy = ref3.reduce((t, p) => t + p[1], 0) / nPts;
+    const q = ref3.map((p) => [p[0] - rcx, p[1] - rcy]);
+    const qq = q.reduce((t, p) => t + p[0] * p[0] + p[1] * p[1], 0) || 1;
+    const shx = q.map(() => []);
+    const shy = q.map(() => []);
+    s.forEach((x, i) => {
+      let a = 0;
+      let b = 0;
+      x.points.forEach((p, c) => {
+        const px = p[0] - cx[i];
+        const py = p[1] - cy[i];
+        a += px * q[c][0] + py * q[c][1];
+        b += py * q[c][0] - px * q[c][1];
+      });
+      a /= qq;
+      b /= qq;
+      x.points.forEach((p, c) => {
+        shx[c].push(p[0] - cx[i] - (a * q[c][0] - b * q[c][1]));
+        shy[c].push(p[1] - cy[i] - (b * q[c][0] + a * q[c][1]));
+      });
+    });
+    for (let c = 0; c < nPts; c++) {
+      const d = new Float64Array(n);
+      for (let i = 1; i < n - 1; i++) {
+        if (f[i] - f[i - 1] !== 1 || f[i + 1] - f[i] !== 1) continue;
+        d[i] = Math.hypot(shx[c][i] - (shx[c][i - 1] + shx[c][i + 1]) / 2, shy[c][i] - (shy[c][i - 1] + shy[c][i + 1]) / 2);
+      }
+      jump.push(d);
+      off.push(robustPath(f, shx[c], shy[c], shapeHalf, true, 0.03 * k).res);
+    }
+  }
+  const checkable = [];
+  for (let i = 1; i < n - 1; i++) if (f[i] - f[i - 1] === 1 && f[i + 1] - f[i] === 1) checkable.push(i);
+  const cornerSigma = jump.length ? rayleighSigma(jump.flatMap((r) => checkable.map((i) => r[i]))) : 0;
+  const offSigma = off.length ? rayleighSigma(off.flatMap((r) => Array.from(r))) : 0;
+  const wholeSigma = rayleighSigma(Array.from(whole.res));
+  const jumpLimit = Math.max(CORNER_JUMP_PX * k, SIGMA_TIMES * cornerSigma);
+  const offLimit = Math.max(CORNER_OFF_PX * k, SIGMA_TIMES * offSigma);
+  const edge = (i) => i < 2 || i >= n - 2 ? 1.5 : 1;
+  const flags = [];
+  const worstOf2 = (r, limit) => {
+    let worst = 0;
+    let at = null;
+    let over = 0;
+    for (let i = 0; i < n; i++) {
+      if (r[i] > worst) {
+        worst = r[i];
+        at = f[i];
+      }
+      if (r[i] > limit * edge(i)) over++;
+    }
+    return { worst: round23(worst), at, over };
+  };
+  const perCorner = jump.map((rj, c) => {
+    const a = worstOf2(rj, jumpLimit);
+    const b = worstOf2(off[c], offLimit);
+    return { worst_jump_px: a.worst, worst_jump_frame: a.at, jumps: a.over, worst_off_px: b.worst, worst_off_frame: b.at, off_frames: b.over };
+  });
+  const jmax = (i) => i < 0 || i >= n ? 0 : Math.max(...jump.map((r) => r[i]));
+  for (let i = 0; jump.length && i < n; i++) {
+    const rj = jmax(i);
+    const ro = Math.max(...off.map((r) => r[i]));
+    if (rj > jumpLimit && rj >= jmax(i - 1) && rj >= jmax(i + 1)) flags.push({ frame: f[i], kind: "jump", px: round23(rj), limit_px: round23(jumpLimit) });
+    else if (ro > offLimit * edge(i)) flags.push({ frame: f[i], kind: "off_path", px: round23(ro), limit_px: round23(offLimit * edge(i)) });
+  }
+  let wWorst = 0;
+  let wFrame = null;
+  for (let i = 0; i < n; i++) {
+    if (whole.res[i] > wWorst) {
+      wWorst = whole.res[i];
+      wFrame = f[i];
+    }
+  }
+  flags.sort((a, b) => b.px / b.limit_px - a.px / a.limit_px);
+  return {
+    frames_checked: n,
+    corner_sigma_px: round23(cornerSigma),
+    jump_limit_px: round23(jumpLimit),
+    off_limit_px: round23(offLimit),
+    per_corner: perCorner,
+    whole: { worst_px: round23(wWorst), worst_frame: wFrame, sigma_px: round23(wholeSigma) },
+    flags,
+    residuals: f.map((fr, i) => ({ frame: fr, jump: jump.map((r) => r[i]), off: off.map((r) => r[i]), whole: whole.res[i] }))
+  };
+}
+var CORNER_JUMP_PX, CORNER_OFF_PX, SIGMA_TIMES, rayleighSigma, median4, round23;
+var init_path_check = __esm({
+  "src/tools/ext/path-check.ts"() {
+    "use strict";
+    CORNER_JUMP_PX = 0.6;
+    CORNER_OFF_PX = 2;
+    SIGMA_TIMES = 6;
+    rayleighSigma = (v) => {
+      if (!v.length) return 0;
+      const s = v.slice().sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)] / 1.1774;
+    };
+    median4 = (v) => {
+      if (!v.length) return 0;
+      const s = v.slice().sort((a, b) => a - b);
+      const m = s.length >> 1;
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    round23 = (v) => Math.round(v * 100) / 100;
+  }
+});
+
 // src/tools/ext/region-track.ts
 function cellsAgree(c) {
   if (c.textured < 4) return true;
@@ -45875,8 +46097,51 @@ function select(a, n, k) {
   }
   return a[k];
 }
-function solve8(A, b) {
-  const n = 8;
+function reduceA(A, basis) {
+  const m = basis.length;
+  const out = new Float64Array(m * m);
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < m; j++) {
+      let v = 0;
+      for (let p = 0; p < 8; p++) {
+        if (basis[i][p] === 0) continue;
+        for (let q = 0; q < 8; q++) if (basis[j][q] !== 0) v += basis[i][p] * A[p * 8 + q] * basis[j][q];
+      }
+      out[i * m + j] = v;
+    }
+  }
+  return out;
+}
+function expandInverse(Am, basis) {
+  const m = basis.length;
+  const inv = invertN(Am, m);
+  if (!inv) return null;
+  const out = new Float64Array(64);
+  for (let p = 0; p < 8; p++) {
+    for (let q = 0; q < 8; q++) {
+      let v = 0;
+      for (let i = 0; i < m; i++) {
+        if (basis[i][p] === 0) continue;
+        for (let j = 0; j < m; j++) if (basis[j][q] !== 0) v += basis[i][p] * inv[i * m + j] * basis[j][q];
+      }
+      out[p * 8 + q] = v;
+    }
+  }
+  return out;
+}
+function invertN(A, n) {
+  const out = new Float64Array(n * n);
+  const e = new Float64Array(n);
+  for (let c = 0; c < n; c++) {
+    e.fill(0);
+    e[c] = 1;
+    const col = solveN(A, e, n);
+    if (!col) return null;
+    for (let r = 0; r < n; r++) out[r * n + c] = col[r];
+  }
+  return out;
+}
+function solveN(A, b, n) {
   const m = new Float64Array(n * (n + 1));
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) m[i * (n + 1) + j] = A[i * n + j];
@@ -45908,18 +46173,6 @@ function solve8(A, b) {
   }
   for (let i = 0; i < n; i++) if (!Number.isFinite(x[i])) return null;
   return x;
-}
-function inverse8(A) {
-  const out = new Float64Array(64);
-  const e = new Float64Array(8);
-  for (let c = 0; c < 8; c++) {
-    e.fill(0);
-    e[c] = 1;
-    const col = solve8(A, e);
-    if (!col) return null;
-    for (let r = 0; r < 8; r++) out[r * 8 + c] = col[r];
-  }
-  return out;
 }
 function pickSpread(cand, mag, w, budget, box) {
   if (cand.length <= budget) return cand.slice();
@@ -45961,9 +46214,78 @@ function pickSpread(cand, mag, w, budget, box) {
   }
   return out;
 }
+function integralRgb(img, x0, y0, x1, y1) {
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const W = w + 1;
+  const s = [new Float64Array(W * (h + 1)), new Float64Array(W * (h + 1)), new Float64Array(W * (h + 1))];
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    let r0 = 0;
+    let r14 = 0;
+    let r214 = 0;
+    const row = (y0 + y) * img.width;
+    const o1 = (y + 1) * W;
+    const o0 = y * W;
+    for (let x = 0; x < w; x++) {
+      const i = (row + x0 + x) * 4;
+      r0 += d[i];
+      r14 += d[i + 1];
+      r214 += d[i + 2];
+      s[0][o1 + x + 1] = s[0][o0 + x + 1] + r0;
+      s[1][o1 + x + 1] = s[1][o0 + x + 1] + r14;
+      s[2][o1 + x + 1] = s[2][o0 + x + 1] + r214;
+    }
+  }
+  return { x0, y0, w, h, s };
+}
+function boxMean(I, c, xa, ya, xb, yb) {
+  const a = Math.max(0, xa - I.x0);
+  const b = Math.max(0, ya - I.y0);
+  const e = Math.min(I.w - 1, xb - I.x0);
+  const f = Math.min(I.h - 1, yb - I.y0);
+  if (e < a || f < b) return NaN;
+  const W = I.w + 1;
+  const s = I.s[c];
+  return (s[(f + 1) * W + e + 1] - s[b * W + e + 1] - s[(f + 1) * W + a] + s[b * W + a]) / ((e - a + 1) * (f - b + 1));
+}
+function matteExclude(aligner, matte, H, marginPx) {
+  const { width: w, height: h, data } = matte;
+  const W = w + 1;
+  const sat = new Float64Array(W * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += data[y * w + x] > 127 ? 1 : 0;
+      sat[(y + 1) * W + x + 1] = sat[y * W + x + 1] + row;
+    }
+  }
+  const r = Math.max(0, Math.round(marginPx));
+  const any = (u, v) => {
+    const a = Math.max(0, Math.round(u) - r);
+    const b = Math.max(0, Math.round(v) - r);
+    const e = Math.min(w - 1, Math.round(u) + r);
+    const f = Math.min(h - 1, Math.round(v) + r);
+    if (e < a || f < b) return false;
+    return sat[(f + 1) * W + e + 1] - sat[b * W + e + 1] - sat[(f + 1) * W + a] + sat[b * W + a] > 0;
+  };
+  return aligner.levels.map((L) => {
+    const out = new Uint8Array(L.n);
+    for (let k = 0; k < L.n; k++) {
+      const p = applyH(H, [L.xs[k] * L.s, L.ys[k] * L.s]);
+      if (p && any(p[0], p[1])) out[k] = 1;
+    }
+    return out;
+  });
+}
+function unionExclude(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return a.map((x, l) => x.map((v, k) => v || b[l][k] ? 1 : 0));
+}
 function verdictWhy(r) {
   if (!(r.ncc >= VERDICT_NCC && r.coverage >= VERDICT_COVERAGE)) {
-    return `the frame does not match the surface (correlation ${round23(r.ncc)} over ${Math.round(100 * r.coverage)}% of it; needs ${VERDICT_NCC} over ${Math.round(100 * VERDICT_COVERAGE)}%)`;
+    return `the frame does not match the surface (correlation ${round24(r.ncc)} over ${Math.round(100 * r.coverage)}% of it; needs ${VERDICT_NCC} over ${Math.round(100 * VERDICT_COVERAGE)}%)`;
   }
   const c = r.cells;
   if (!(c.matched >= Math.max(3, CELL_SHARE * c.textured))) return `only part of the surface lines up (${c.matched} of ${c.textured} textured cells agree; needs ${Math.round(100 * CELL_SHARE)}%)`;
@@ -45981,7 +46303,7 @@ function compToImgH(H, scale) {
   const out = mulH(Ti, mulH(H, T));
   return out.map((v) => v / out[8]);
 }
-var VERDICT_NCC, VERDICT_COVERAGE, CELL_GRID, CELL_MIN_STD, CELL_NCC, CELL_SHARE, PIN_PX, PIN_RATIO, scaleH, unscaleH, RegionAligner, REGION_ERROR_SCALE, RegionTracker, verdict, round23;
+var VERDICT_NCC, VERDICT_COVERAGE, CELL_GRID, CELL_MIN_STD, CELL_NCC, CELL_SHARE, PIN_PX, PIN_RATIO, BASES, scaleH, unscaleH, RegionAligner, REGION_ERROR_SCALE, OCCLUDER_MIN_POINTS, OCCLUDER_MARGIN, OCCLUDER_MAX_SHARE, OccluderDetector, RegionTracker, verdict, round24;
 var init_region_track = __esm({
   "src/tools/ext/region-track.ts"() {
     "use strict";
@@ -45994,6 +46316,17 @@ var init_region_track = __esm({
     CELL_SHARE = 0.35;
     PIN_PX = 2;
     PIN_RATIO = 2;
+    BASES = {
+      perspective: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [0, 1, 2, 3, 4, 5, 6, 7].map((j) => i === j ? 1 : 0)),
+      affine: [0, 1, 2, 3, 4, 5].map((i) => [0, 1, 2, 3, 4, 5, 6, 7].map((j) => i === j ? 1 : 0)),
+      // a: uniform scale, b: rotation, then the shift.
+      similarity: [
+        [1, 0, 0, 0, 1, 0, 0, 0],
+        [0, -1, 0, 1, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0]
+      ]
+    };
     scaleH = (H, s) => mulH(mulH([1 / s, 0, 0, 0, 1 / s, 0, 0, 0, 1], H), [s, 0, 0, 0, s, 0, 0, 0, 1]);
     unscaleH = (H, s) => mulH(mulH([s, 0, 0, 0, s, 0, 0, 0, 1], H), [1 / s, 0, 0, 0, 1 / s, 0, 0, 0, 1]);
     RegionAligner = class {
@@ -46004,18 +46337,33 @@ var init_region_track = __esm({
       samples;
       /** The region's box at the finest level, image px: x0, y0, x1, y1. */
       box;
+      /** How many images every frame is aligned in (luma alone, or luma and a screen's key). */
+      channels;
+      /** The channels the verdict is read from. */
+      verdictChannels;
+      /**
+       * `ref` is the reference frame, one image or one per channel (all the same size): with more than one,
+       * every frame is aligned in all of them at once (see align).
+       */
       constructor(ref3, mask, opts = {}) {
+        const refs = Array.isArray(ref3) ? ref3 : [ref3];
+        if (refs.length < 1) throw new Error("no image to follow");
+        const C = refs.length;
+        const ref0 = refs[0];
         const maxSamples = Math.max(500, opts.maxSamples ?? 12e3);
-        this.width = ref3.width;
-        this.height = ref3.height;
+        this.width = ref0.width;
+        this.height = ref0.height;
+        this.channels = C;
+        const vc = (opts.verdictChannels ?? []).filter((c) => Number.isInteger(c) && c >= 0 && c < C);
+        this.verdictChannels = vc.length ? Array.from(new Set(vc)) : Array.from({ length: C }, (_, c) => c);
         let x0 = Infinity;
         let y0 = Infinity;
         let x1 = -Infinity;
         let y1 = -Infinity;
         let area = 0;
-        for (let y = 0; y < ref3.height; y++) {
-          for (let x = 0; x < ref3.width; x++) {
-            if (!(mask[y * ref3.width + x] > 0)) continue;
+        for (let y = 0; y < ref0.height; y++) {
+          for (let x = 0; x < ref0.width; x++) {
+            if (!(mask[y * ref0.width + x] > 0)) continue;
             area++;
             if (x < x0) x0 = x;
             if (x > x1) x1 = x;
@@ -46027,23 +46375,30 @@ var init_region_track = __esm({
         this.box = [x0, y0, x1, y1];
         let nLevels = Math.max(1, Math.min(6, opts.levels ?? 4));
         while (nLevels > 1 && area / 4 ** (nLevels - 1) < 1e3) nLevels--;
-        const pyr = pyramid(ref3, nLevels);
+        const pyrs = refs.map((r) => pyramid(r, nLevels));
         for (let l = 0; l < nLevels; l++) {
           const s = 2 ** l;
-          const img = pyr[l];
-          const { width: w, height: h } = img;
-          const { gx, gy } = sobel(img);
+          const { width: w, height: h } = pyrs[0][l];
+          const grads = pyrs.map((p) => sobel(p[l]));
           const stride = Math.max(1, Math.floor(Math.sqrt(area / 4 ** l / (8 * maxSamples))));
           const cand = [];
           for (let y = 1; y < h - 1; y += stride) {
-            const y0p = Math.min(ref3.height - 1, y * s);
+            const y0p = Math.min(ref0.height - 1, y * s);
             for (let x = 1; x < w - 1; x += stride) {
-              const x0p = Math.min(ref3.width - 1, x * s);
-              if (mask[y0p * ref3.width + x0p] > 0) cand.push(y * w + x);
+              const x0p = Math.min(ref0.width - 1, x * s);
+              if (mask[y0p * ref0.width + x0p] > 0) cand.push(y * w + x);
             }
           }
+          const scales = grads.map((g) => {
+            const m = cand.map((i) => Math.hypot(g.gx[i], g.gy[i])).sort((a, b) => a - b);
+            return Math.max(1e-6, m.length ? m[Math.floor(0.9 * (m.length - 1))] : 1);
+          });
           const mag = new Float64Array(cand.length);
-          for (let k = 0; k < cand.length; k++) mag[k] = Math.hypot(gx[cand[k]], gy[cand[k]]);
+          for (let k = 0; k < cand.length; k++) {
+            let v = 0;
+            for (let c = 0; c < C; c++) v = Math.max(v, Math.hypot(grads[c].gx[cand[k]], grads[c].gy[cand[k]]) * scales[0] / scales[c]);
+            mag[k] = v;
+          }
           const budget = Math.min(cand.length, maxSamples);
           const picked = pickSpread(cand, mag, w, budget, [x0 / s, y0 / s, x1 / s, y1 / s]);
           const n = picked.length;
@@ -46053,8 +46408,9 @@ var init_region_track = __esm({
           const r = Math.max(4, Math.max(x1 - x0, y1 - y0) / 2 / s);
           const xs = new Float32Array(n);
           const ys = new Float32Array(n);
-          const tv = new Float64Array(n);
-          const J = new Float64Array(n * 8);
+          const tvs = refs.map(() => new Float64Array(n));
+          const Js = refs.map(() => new Float64Array(n * 8));
+          const strongs = refs.map(() => new Uint8Array(n));
           let strong = 0;
           for (let k = 0; k < n; k++) {
             const i = picked[k];
@@ -46062,40 +46418,64 @@ var init_region_track = __esm({
             const y = (i - x) / w;
             xs[k] = x;
             ys[k] = y;
-            tv[k] = img.data[i];
             const xn = (x - cx) / r;
             const yn = (y - cy) / r;
-            const gxn = gx[i] * r;
-            const gyn = gy[i] * r;
-            const d = gxn * xn + gyn * yn;
-            const o = k * 8;
-            J[o] = gxn * xn;
-            J[o + 1] = gxn * yn;
-            J[o + 2] = gxn;
-            J[o + 3] = gyn * xn;
-            J[o + 4] = gyn * yn;
-            J[o + 5] = gyn;
-            J[o + 6] = -xn * d;
-            J[o + 7] = -yn * d;
-            if (Math.hypot(gx[i], gy[i]) >= 2) strong++;
+            let best = 0;
+            for (let c = 0; c < C; c++) {
+              const g = grads[c];
+              tvs[c][k] = pyrs[c][l].data[i];
+              const gxn = g.gx[i] * r;
+              const gyn = g.gy[i] * r;
+              const d = gxn * xn + gyn * yn;
+              const J = Js[c];
+              const o = k * 8;
+              J[o] = gxn * xn;
+              J[o + 1] = gxn * yn;
+              J[o + 2] = gxn;
+              J[o + 3] = gyn * xn;
+              J[o + 4] = gyn * yn;
+              J[o + 5] = gyn;
+              J[o + 6] = -xn * d;
+              J[o + 7] = -yn * d;
+              best = Math.max(best, Math.hypot(g.gx[i], g.gy[i]) * scales[0] / scales[c]);
+              if (Math.hypot(g.gx[i], g.gy[i]) >= 1) strongs[c][k] = 1;
+            }
+            if (best >= 2) strong++;
           }
           if (l === 0 && strong < 150) throw new Error("the region is flat (almost no edges or texture to follow)");
           const N = [1 / r, 0, -cx / r, 0, 1 / r, -cy / r, 0, 0, 1];
-          this.levels.push({ s, n, xs, ys, tv, J, N, Ninv: invertH(N), r });
+          this.levels.push({ s, n, xs, ys, tv: tvs[0], J: Js[0], tvs, Js, strongs, N, Ninv: invertH(N), r });
         }
         this.samples = this.levels[0].n;
       }
+      /** The frame's pyramids, one per channel, as align() wants them. */
+      pyramids(frame) {
+        const chans = Array.isArray(frame) ? frame : [frame];
+        if (chans.length !== this.channels) throw new Error(`the frame has ${chans.length} channels, the region ${this.channels}`);
+        return chans.map((c) => pyramid(c, this.levels.length));
+      }
       /**
-       * Aligns a frame (its pyramid, from `pyramid(frame, levels)`) starting from H0 (reference image px ->
-       * frame image px). `prior` is the last good frame's weights (the occlusion memory). `fromLevel` starts
-       * at a finer level than the coarsest (for a refinement of a motion that is already close). Null with a
-       * reason when the region leaves the frame or the fit diverges.
+       * Aligns a frame starting from H0 (reference image px -> frame image px). `frame` is its pyramid
+       * (`pyramid(frame, levels)`) for one channel, or one pyramid per channel (`pyramids`). Every channel is
+       * fitted at the same points, each scaled by its own noise; a point counts by its residual over all of
+       * them, so an occluder that looks like the surface in one channel (a hand's edge where a screen's edge
+       * was, in the key) is pushed out by another (its brightness). `prior` is the last good frame's weights
+       * (the occlusion memory). `fromLevel` starts at a finer level than the coarsest (for a refinement of a
+       * motion that is already close). `model` limits what the fit may change on top of H0. `exclude` (per
+       * level, per sample) leaves samples out of every iteration: what an occluder detector found covered.
+       * Null with a reason when the region leaves the frame or the fit diverges.
        */
-      align(frame, H0, prior = null, fromLevel) {
+      align(frame, H0, prior = null, fromLevel, model = "perspective", exclude = null) {
+        const pyrs = Array.isArray(frame[0]) ? frame : [frame];
+        const C = this.channels;
+        if (pyrs.length !== C) return { failed: `the frame has ${pyrs.length} channels, the region ${C}` };
+        const basis = BASES[model];
+        const mdim = basis.length;
         const top = Math.min(this.levels.length - 1, fromLevel ?? this.levels.length - 1);
         let H = H0.slice();
         const weights = new Array(this.levels.length);
         let ncc = 0;
+        let nccs = [];
         let coverage = 0;
         let visible = 0;
         let sigma = 0;
@@ -46103,25 +46483,30 @@ var init_region_track = __esm({
         let cells = { textured: 0, matched: 0, span: [0, 0], pinned: 1, pinned_px: 0 };
         for (let l = top; l >= 0; l--) {
           const L = this.levels[l];
-          const img = frame[l];
-          if (!img) return { failed: "the frame has no image at this level" };
-          const { width: w, height: h, data } = img;
+          const imgs = pyrs.map((p) => p[l]);
+          if (imgs.some((im) => !im)) return { failed: "the frame has no image at this level" };
+          const { width: w, height: h } = imgs[0];
           let Hl = scaleH(H, L.s);
           const n = L.n;
           const iters = l > 0 ? 40 : 25;
           const late2 = Math.floor(2 * iters / 3);
           const pm = prior && prior[l] && prior[l].length === n ? prior[l] : null;
-          const iv = new Float64Array(n);
-          const e = new Float64Array(n);
+          const ex = exclude && exclude[l] && exclude[l].length === n ? exclude[l] : null;
+          const ivs = imgs.map(() => new Float64Array(n));
+          const es = imgs.map(() => new Float64Array(n));
           const ok = new Uint8Array(n);
           let wgt = null;
           const abs = new Float64Array(n);
+          const rr = new Float64Array(n);
           const A = new Float64Array(64);
           const bv = new Float64Array(8);
+          const sc = new Float64Array(C);
           let okCount = 0;
+          let inFrame = 0;
           let lastSig2 = 0;
           for (let it = 0; it < iters; it++) {
             okCount = 0;
+            inFrame = 0;
             const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = Hl;
             for (let k = 0; k < n; k++) {
               const x = L.xs[k];
@@ -46134,65 +46519,89 @@ var init_region_track = __esm({
                 ok[k] = 0;
                 continue;
               }
+              inFrame++;
+              if (ex && ex[k]) {
+                ok[k] = 0;
+                continue;
+              }
               const ix = Math.floor(u);
               const iy = Math.floor(v);
               const fx = u - ix;
               const fy = v - iy;
               const p = iy * w + ix;
-              iv[k] = (data[p] * (1 - fx) + data[p + 1] * fx) * (1 - fy) + (data[p + w] * (1 - fx) + data[p + w + 1] * fx) * fy;
+              for (let c = 0; c < C; c++) {
+                const data = imgs[c].data;
+                ivs[c][k] = (data[p] * (1 - fx) + data[p + 1] * fx) * (1 - fy) + (data[p + w] * (1 - fx) + data[p + w + 1] * fx) * fy;
+              }
               ok[k] = 1;
               okCount++;
             }
-            if (okCount < Math.min(200, 0.3 * n)) return { failed: "the region is out of the frame" };
-            let sw = 0;
-            let st = 0;
-            let si = 0;
-            for (let k = 0; k < n; k++) {
-              if (!ok[k]) continue;
-              const ww = wgt ? wgt[k] : 1;
-              sw += ww;
-              st += ww * L.tv[k];
-              si += ww * iv[k];
+            if (inFrame < Math.min(200, 0.3 * n)) return { failed: "the region is out of the frame" };
+            if (okCount < Math.min(150, 0.1 * n)) return { failed: `the surface is covered: ${Math.round(100 * (inFrame - okCount) / Math.max(1, inFrame))}% of what is in the frame is hidden by something in front` };
+            let sw0 = 0;
+            if (wgt) {
+              for (let k = 0; k < n; k++) if (ok[k]) sw0 += wgt[k];
             }
-            let useW = wgt !== null && sw >= 100;
-            if (!useW) {
-              sw = okCount;
-              st = 0;
-              si = 0;
+            const useW = wgt !== null && sw0 >= 100;
+            for (let c = 0; c < C; c++) {
+              const tv = L.tvs[c];
+              const iv = ivs[c];
+              const e = es[c];
+              let sw = 0;
+              let st = 0;
+              let si = 0;
               for (let k = 0; k < n; k++) {
                 if (!ok[k]) continue;
-                st += L.tv[k];
-                si += iv[k];
+                const ww = useW ? wgt[k] : 1;
+                sw += ww;
+                st += ww * tv[k];
+                si += ww * iv[k];
               }
+              const mt = st / sw;
+              const mi = si / sw;
+              let vt = 0;
+              let cti = 0;
+              for (let k = 0; k < n; k++) {
+                if (!ok[k]) continue;
+                const ww = useW ? wgt[k] : 1;
+                vt += ww * (tv[k] - mt) ** 2;
+                cti += ww * (tv[k] - mt) * (iv[k] - mi);
+              }
+              let g = cti / Math.max(vt, 1e-6);
+              if (!(g > 0.3 && g < 3)) g = 1;
+              const b = mi - g * mt;
+              const st2 = L.strongs[c];
+              let na = 0;
+              for (let k = 0; k < n; k++) {
+                if (!ok[k]) {
+                  e[k] = 0;
+                  continue;
+                }
+                e[k] = (iv[k] - b) / g - tv[k];
+                if (st2[k] && (!wgt || wgt[k] > 0)) abs[na++] = Math.abs(e[k]);
+              }
+              if (na < 100) {
+                na = 0;
+                for (let k = 0; k < n; k++) if (ok[k] && st2[k]) abs[na++] = Math.abs(e[k]);
+              }
+              if (na < 100) {
+                na = 0;
+                for (let k = 0; k < n; k++) if (ok[k]) abs[na++] = Math.abs(e[k]);
+              }
+              const sig = 1.4826 * select(abs, na, na >> 1) + 1e-3;
+              sc[c] = Math.max(sig, 1);
+              if (c === 0) sigma = sig;
             }
-            const mt = st / sw;
-            const mi = si / sw;
-            let vt = 0;
-            let cti = 0;
-            for (let k = 0; k < n; k++) {
-              if (!ok[k]) continue;
-              const ww = useW ? wgt[k] : 1;
-              vt += ww * (L.tv[k] - mt) ** 2;
-              cti += ww * (L.tv[k] - mt) * (iv[k] - mi);
-            }
-            let g = cti / Math.max(vt, 1e-6);
-            if (!(g > 0.3 && g < 3)) g = 1;
-            const b = mi - g * mt;
-            let na = 0;
             for (let k = 0; k < n; k++) {
               if (!ok[k]) {
-                e[k] = 0;
+                rr[k] = 0;
                 continue;
               }
-              e[k] = (iv[k] - b) / g - L.tv[k];
-              if (!wgt || wgt[k] > 0) abs[na++] = Math.abs(e[k]);
+              let q = 0;
+              for (let c = 0; c < C; c++) q += (es[c][k] / sc[c]) ** 2;
+              rr[k] = Math.sqrt(q / C);
             }
-            if (na < 100) {
-              na = 0;
-              for (let k = 0; k < n; k++) if (ok[k]) abs[na++] = Math.abs(e[k]);
-            }
-            const sig = 1.4826 * select(abs, na, na >> 1) + 1e-3;
-            const kk = 4.685 * Math.max(sig, 1);
+            const kk = 4.685;
             if (!wgt) wgt = new Float64Array(n);
             const masking = pm !== null && it < late2;
             let pmCount = 0;
@@ -46206,31 +46615,39 @@ var init_region_track = __esm({
             let se2 = 0;
             for (let k = 0; k < n; k++) {
               let ww = 0;
-              if (ok[k] && Math.abs(e[k]) < kk) {
-                const q = e[k] / kk;
+              if (ok[k] && rr[k] < kk) {
+                const q = rr[k] / kk;
                 ww = (1 - q * q) ** 2;
               }
               if (usePrior && !(pm[k] > 0.25)) ww = 0;
               wgt[k] = ww;
               if (ww === 0) continue;
               const o = k * 8;
-              const ek = e[k];
-              for (let i = 0; i < 8; i++) {
-                const ji = L.J[o + i] * ww;
-                bv[i] += ji * ek;
-                for (let j = i; j < 8; j++) A[i * 8 + j] += ji * L.J[o + j];
+              for (let c = 0; c < C; c++) {
+                const J = L.Js[c];
+                const inv2 = 1 / (sc[c] * sc[c]);
+                const ek = es[c][k];
+                for (let i = 0; i < 8; i++) {
+                  const ji = J[o + i] * ww * inv2;
+                  bv[i] += ji * ek;
+                  for (let j = i; j < 8; j++) A[i * 8 + j] += ji * J[o + j];
+                }
               }
               sw2 += ww;
-              se2 += ww * ek * ek;
+              se2 += ww * rr[k] * rr[k];
             }
             for (let i = 0; i < 8; i++) {
               for (let j = 0; j < i; j++) A[i * 8 + j] = A[j * 8 + i];
               A[i * 8 + i] += 1e-6;
             }
             lastSig2 = sw2 > 8 ? se2 / sw2 : 0;
-            sigma = sig;
-            const dp = solve8(A, bv);
-            if (!dp) return { failed: "the fit is singular (the region has texture in one direction only)" };
+            const Am = reduceA(A, basis);
+            const bm = new Float64Array(mdim);
+            for (let i = 0; i < mdim; i++) for (let p = 0; p < 8; p++) bm[i] += basis[i][p] * bv[p];
+            const dm = solveN(Am, bm, mdim);
+            if (!dm) return { failed: "the fit is singular (the region has texture in one direction only)" };
+            const dp = new Float64Array(8);
+            for (let i = 0; i < mdim; i++) for (let p = 0; p < 8; p++) dp[p] += basis[i][p] * dm[i];
             const Wn = [1 + dp[0], dp[1], dp[2], dp[3], 1 + dp[4], dp[5], dp[6], dp[7], 1];
             const Wp = mulH(L.Ninv, mulH(Wn, L.N));
             const Wi = invertH(Wp);
@@ -46250,45 +46667,56 @@ var init_region_track = __esm({
           }
           weights[l] = wf;
           H = unscaleH(Hl, L.s);
-          visible = okCount / n;
-          coverage = okCount > 0 ? kept / okCount : 0;
+          visible = inFrame / n;
+          coverage = inFrame > 0 ? kept / inFrame : 0;
           if (l === 0) {
-            let sa = 0;
-            let sb = 0;
-            let saa = 0;
-            let sbb = 0;
-            let sab = 0;
-            for (let k = 0; k < n; k++) {
-              if (!(ok[k] && wf[k] > 0.5)) continue;
-              const a = L.tv[k];
-              const c = iv[k];
-              sa += a;
-              sb += c;
-              saa += a * a;
-              sbb += c * c;
-              sab += a * c;
+            let sum = 0;
+            const perC = [];
+            for (let c = 0; c < C; c++) {
+              let sa = 0;
+              let sb = 0;
+              let saa = 0;
+              let sbb = 0;
+              let sab = 0;
+              for (let k = 0; k < n; k++) {
+                if (!(ok[k] && wf[k] > 0.5)) continue;
+                const a = L.tvs[c][k];
+                const b2 = ivs[c][k];
+                sa += a;
+                sb += b2;
+                saa += a * a;
+                sbb += b2 * b2;
+                sab += a * b2;
+              }
+              let r = 0;
+              if (kept > 50) {
+                const va = saa - sa * sa / kept;
+                const vb = sbb - sb * sb / kept;
+                r = va > 1e-9 && vb > 1e-9 ? (sab - sa * sb / kept) / Math.sqrt(va * vb) : 0;
+              }
+              sum += r;
+              perC.push(r);
             }
-            if (kept > 50) {
-              const va = saa - sa * sa / kept;
-              const vb = sbb - sb * sb / kept;
-              ncc = va > 1e-9 && vb > 1e-9 ? (sab - sa * sb / kept) / Math.sqrt(va * vb) : 0;
-            } else {
-              ncc = 0;
-            }
-            const inv = inverse8(A);
+            ncc = this.verdictChannels.reduce((t, c) => t + perC[c], 0) / this.verdictChannels.length;
+            nccs = perC;
+            const inv = expandInverse(reduceA(A, basis), basis);
             cov = inv ? inv.map((v) => v * lastSig2) : null;
-            const ca = this.cellAgreement(L, ok, iv);
+            const ca = this.cellAgreement(L, ok, ivs, this.verdictChannels);
             const am = new Float64Array(64);
             for (let k = 0; k < n; k++) {
               if (!(ok[k] && wf[k] > 0.5 && ca.agree[this.cellOf(k)])) continue;
               const o = k * 8;
-              for (let i = 0; i < 8; i++) for (let j = i; j < 8; j++) am[i * 8 + j] += wf[k] * L.J[o + i] * L.J[o + j];
+              for (let c = 0; c < C; c++) {
+                const J = L.Js[c];
+                const f = wf[k] / (sc[c] * sc[c]);
+                for (let i = 0; i < 8; i++) for (let j = i; j < 8; j++) am[i * 8 + j] += f * J[o + i] * J[o + j];
+              }
             }
             for (let i = 0; i < 8; i++) {
               for (let j = 0; j < i; j++) am[i * 8 + j] = am[j * 8 + i];
               am[i * 8 + i] += 1e-6;
             }
-            const invm = inverse8(am);
+            const invm = expandInverse(reduceA(am, basis), basis);
             const [bx0, by0, bx1, by1] = this.box;
             const corners = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
             const whole = cov ? this.errorFromCov(cov, H, corners) : null;
@@ -46298,7 +46726,7 @@ var init_region_track = __esm({
           }
         }
         for (let l = 0; l < this.levels.length; l++) if (!weights[l]) weights[l] = new Float32Array(this.levels[l].n).fill(1);
-        return { H, ncc, coverage, visible, sigma, weights, cov, cells };
+        return { H, ncc, nccs, coverage, visible, sigma, weights, cov, cells };
       }
       cellOf(k) {
         const L = this.levels[0];
@@ -46310,26 +46738,33 @@ var init_region_track = __esm({
         const cy = Math.min(G - 1, Math.max(0, Math.floor((L.ys[k] - y0) / ch)));
         return cy * G + cx;
       }
-      cellAgreement(L, ok, iv) {
+      /**
+       * Per cell and channel: the reference samples' spread and their correlation with the frame. A cell is
+       * textured when any channel varies in it; it agrees when every channel that varies there correlates.
+       */
+      cellAgreement(L, ok, ivs, chans) {
         const G = CELL_GRID;
+        const C = chans.length;
         const [x0, y0, x1, y1] = this.box;
         const cw = Math.max(1, (x1 - x0 + 1) / G);
         const ch = Math.max(1, (y1 - y0 + 1) / G);
-        const acc = new Float64Array(G * G * 6);
+        const acc = new Float64Array(G * G * C * 6);
         const agree = new Uint8Array(G * G);
         for (let k = 0; k < L.n; k++) {
           if (!ok[k]) continue;
           const cx = Math.min(G - 1, Math.max(0, Math.floor((L.xs[k] - x0) / cw)));
           const cy = Math.min(G - 1, Math.max(0, Math.floor((L.ys[k] - y0) / ch)));
-          const o = (cy * G + cx) * 6;
-          const a = L.tv[k];
-          const b = iv[k];
-          acc[o] += 1;
-          acc[o + 1] += a;
-          acc[o + 2] += b;
-          acc[o + 3] += a * a;
-          acc[o + 4] += b * b;
-          acc[o + 5] += a * b;
+          for (let c = 0; c < C; c++) {
+            const o = ((cy * G + cx) * C + c) * 6;
+            const a = L.tvs[chans[c]][k];
+            const b = ivs[chans[c]][k];
+            acc[o] += 1;
+            acc[o + 1] += a;
+            acc[o + 2] += b;
+            acc[o + 3] += a * a;
+            acc[o + 4] += b * b;
+            acc[o + 5] += a * b;
+          }
         }
         let textured = 0;
         let matched = 0;
@@ -46341,24 +46776,31 @@ var init_region_track = __esm({
         let mx1 = -1;
         let my0 = G;
         let my1 = -1;
-        for (let c = 0; c < G * G; c++) {
-          const o = c * 6;
-          const n = acc[o];
-          if (n < 20) continue;
-          const va = acc[o + 3] - acc[o + 1] * acc[o + 1] / n;
-          if (!(Math.sqrt(Math.max(0, va) / n) >= CELL_MIN_STD)) continue;
+        for (let cell = 0; cell < G * G; cell++) {
+          let anyTex = false;
+          let allAgree = true;
+          for (let c = 0; c < C; c++) {
+            const o = (cell * C + c) * 6;
+            const n = acc[o];
+            if (n < 20) continue;
+            const va = acc[o + 3] - acc[o + 1] * acc[o + 1] / n;
+            if (!(Math.sqrt(Math.max(0, va) / n) >= CELL_MIN_STD)) continue;
+            anyTex = true;
+            const vb = acc[o + 4] - acc[o + 2] * acc[o + 2] / n;
+            const r = vb > 1e-9 ? (acc[o + 5] - acc[o + 1] * acc[o + 2] / n) / Math.sqrt(va * vb) : 0;
+            if (!(r >= CELL_NCC)) allAgree = false;
+          }
+          if (!anyTex) continue;
           textured++;
-          const cx = c % G;
-          const cy = (c - cx) / G;
+          const cx = cell % G;
+          const cy = (cell - cx) / G;
           tx0 = Math.min(tx0, cx);
           tx1 = Math.max(tx1, cx);
           ty0 = Math.min(ty0, cy);
           ty1 = Math.max(ty1, cy);
-          const vb = acc[o + 4] - acc[o + 2] * acc[o + 2] / n;
-          const r = vb > 1e-9 ? (acc[o + 5] - acc[o + 1] * acc[o + 2] / n) / Math.sqrt(va * vb) : 0;
-          if (r >= CELL_NCC) {
+          if (allAgree) {
             matched++;
-            agree[c] = 1;
+            agree[cell] = 1;
             mx0 = Math.min(mx0, cx);
             mx1 = Math.max(mx1, cx);
             my0 = Math.min(my0, cy);
@@ -46412,14 +46854,220 @@ var init_region_track = __esm({
       }
     };
     REGION_ERROR_SCALE = 12;
+    OCCLUDER_MIN_POINTS = 6;
+    OCCLUDER_MARGIN = 2;
+    OCCLUDER_MAX_SHARE = 0.6;
+    OccluderDetector = class {
+      /** `keyAlpha`: how much a colour (0-255 each) is still the key, 0..1 (screen-track.ts keyPresenceOf). */
+      constructor(refImg, mask, aligner, keyAlpha) {
+        this.keyAlpha = keyAlpha;
+        const [bx0, by0, bx1, by1] = aligner.box;
+        const side = Math.max(bx1 - bx0 + 1, by1 - by0 + 1);
+        const step3 = Math.max(3, Math.round(side / 80));
+        this.step = step3;
+        const gw = Math.max(1, Math.ceil((bx1 - bx0 + 1) / step3));
+        const gh = Math.max(1, Math.ceil((by1 - by0 + 1) / step3));
+        this.gw = gw;
+        this.gh = gh;
+        const W = refImg.width;
+        const H = refImg.height;
+        const inMask = (x, y) => x >= 0 && y >= 0 && x < W && y < H && mask[Math.round(y) * W + Math.round(x)] > 0;
+        const cellPoint = new Int32Array(gw * gh).fill(-1);
+        const xs = [];
+        const ys = [];
+        const cells = [];
+        const half = Math.floor(step3 / 2);
+        for (let j = 0; j < gh; j++) {
+          for (let i = 0; i < gw; i++) {
+            const x = Math.min(W - 1, bx0 + i * step3 + half);
+            const y = Math.min(H - 1, by0 + j * step3 + half);
+            const xa = bx0 + i * step3;
+            const ya = by0 + j * step3;
+            const xb = Math.min(W - 1, xa + step3 - 1);
+            const yb = Math.min(H - 1, ya + step3 - 1);
+            if (!(inMask(x, y) || inMask(xa, ya) || inMask(xb, ya) || inMask(xa, yb) || inMask(xb, yb))) continue;
+            cellPoint[j * gw + i] = xs.length;
+            xs.push(x);
+            ys.push(y);
+            cells.push(j * gw + i);
+          }
+        }
+        this.cellOfPoint = Int32Array.from(cells);
+        this.points = xs.length;
+        this.px = Float32Array.from(xs);
+        this.py = Float32Array.from(ys);
+        const I = integralRgb(refImg, Math.max(0, bx0 - step3), Math.max(0, by0 - step3), Math.min(W - 1, bx1 + step3), Math.min(H - 1, by1 + step3));
+        this.keyed = new Uint8Array(this.points);
+        for (let p = 0; p < this.points; p++) {
+          const m = [0, 1, 2].map((c) => boxMean(I, c, xs[p] - half, ys[p] - half, xs[p] + half, ys[p] + half));
+          if (keyAlpha(m[0], m[1], m[2]) >= 0.9) this.keyed[p] = 1;
+        }
+        this.sampleCell = aligner.levels.map((L) => {
+          const out = new Int32Array(L.n).fill(-1);
+          for (let k = 0; k < L.n; k++) {
+            const i = Math.floor((L.xs[k] * L.s - bx0) / step3);
+            const j = Math.floor((L.ys[k] * L.s - by0) / step3);
+            if (i >= 0 && j >= 0 && i < gw && j < gh) out[k] = cellPoint[j * gw + i];
+          }
+          return out;
+        });
+      }
+      keyAlpha;
+      /** Grid step, reference image px. */
+      step;
+      points;
+      gw;
+      gh;
+      cellOfPoint;
+      px;
+      py;
+      /** The points that are the key colour in the reference frame. */
+      keyed;
+      /** Per aligner level, per sample: the point it falls on, or -1. */
+      sampleCell;
+      /** Where the frame (as rendered) has something in front of the key, with H (reference image px -> frame image px) the motion to look with. */
+      detect(frame, H) {
+        const n = this.points;
+        const W = frame.width;
+        const Hh = frame.height;
+        const qx = new Int32Array(n);
+        const qy = new Int32Array(n);
+        const hb = new Int32Array(n);
+        const sh = new Int32Array(n);
+        const inside = new Uint8Array(n);
+        let inFrame = 0;
+        let fx0 = Infinity;
+        let fy0 = Infinity;
+        let fx1 = -Infinity;
+        let fy1 = -Infinity;
+        const [h0, h1, h2, h3, h4, h5, h6, h7, h8] = H;
+        for (let p = 0; p < n; p++) {
+          const x = this.px[p];
+          const y = this.py[p];
+          const z = h6 * x + h7 * y + h8;
+          if (!(z > 1e-9)) continue;
+          const u = (h0 * x + h1 * y + h2) / z;
+          const v = (h3 * x + h4 * y + h5) / z;
+          const det = ((h0 - u * h6) * (h4 - v * h7) - (h1 - u * h7) * (h3 - v * h6)) / (z * z);
+          const k = Math.sqrt(Math.abs(det));
+          if (!Number.isFinite(k) || k <= 0) continue;
+          const b = Math.max(1, Math.round(this.step * k / 2));
+          const t = Math.max(1, Math.round(this.step * k));
+          const reach = b + t;
+          const iu = Math.round(u);
+          const iv = Math.round(v);
+          if (iu - reach < 0 || iv - reach < 0 || iu + reach > W - 1 || iv + reach > Hh - 1) continue;
+          inside[p] = 1;
+          inFrame++;
+          qx[p] = iu;
+          qy[p] = iv;
+          hb[p] = b;
+          sh[p] = t;
+          fx0 = Math.min(fx0, iu - reach);
+          fy0 = Math.min(fy0, iv - reach);
+          fx1 = Math.max(fx1, iu + reach);
+          fy1 = Math.max(fy1, iv + reach);
+        }
+        if (inFrame < OCCLUDER_MIN_POINTS * 4) return { flags: new Uint8Array(n), share: 0, found: 0, inFrame };
+        const I = integralRgb(frame, fx0, fy0, fx1, fy1);
+        const cand = new Uint8Array(this.gw * this.gh);
+        for (let p = 0; p < n; p++) {
+          if (!inside[p] || !this.keyed[p]) continue;
+          let gone = true;
+          for (let dy = -1; dy <= 1 && gone; dy++) {
+            for (let dx = -1; dx <= 1 && gone; dx++) {
+              const cx = qx[p] + dx * sh[p];
+              const cy = qy[p] + dy * sh[p];
+              const m = [0, 1, 2].map((c) => boxMean(I, c, cx - hb[p], cy - hb[p], cx + hb[p], cy + hb[p]));
+              if (this.keyAlpha(m[0], m[1], m[2]) >= 0.5) gone = false;
+            }
+          }
+          if (gone) cand[this.cellOfPoint[p]] = 1;
+        }
+        return this.piecesOf(cand, inside, inFrame);
+      }
+      /** Pieces (8-connected) of OCCLUDER_MIN_POINTS or more among the candidates, grown by the margin. */
+      piecesOf(cand, inside, inFrame) {
+        const n = this.points;
+        const flags = new Uint8Array(n);
+        const keep = new Uint8Array(this.gw * this.gh);
+        const seen = new Uint8Array(this.gw * this.gh);
+        const stack = [];
+        let found = 0;
+        for (let c0 = 0; c0 < cand.length; c0++) {
+          if (!cand[c0] || seen[c0]) continue;
+          const piece = [];
+          stack.push(c0);
+          seen[c0] = 1;
+          while (stack.length) {
+            const c = stack.pop();
+            piece.push(c);
+            const ci = c % this.gw;
+            const cj = (c - ci) / this.gw;
+            for (let dj = -1; dj <= 1; dj++) {
+              for (let di = -1; di <= 1; di++) {
+                const i = ci + di;
+                const j = cj + dj;
+                if (i < 0 || j < 0 || i >= this.gw || j >= this.gh) continue;
+                const d = j * this.gw + i;
+                if (cand[d] && !seen[d]) {
+                  seen[d] = 1;
+                  stack.push(d);
+                }
+              }
+            }
+          }
+          if (piece.length >= OCCLUDER_MIN_POINTS) {
+            for (const c of piece) keep[c] = 1;
+            found += piece.length;
+          }
+        }
+        let flagged = 0;
+        for (let p = 0; p < n; p++) {
+          const c = this.cellOfPoint[p];
+          const ci = c % this.gw;
+          const cj = (c - ci) / this.gw;
+          let hit = 0;
+          for (let dj = -OCCLUDER_MARGIN; dj <= OCCLUDER_MARGIN && !hit; dj++) {
+            for (let di = -OCCLUDER_MARGIN; di <= OCCLUDER_MARGIN && !hit; di++) {
+              const i = ci + di;
+              const j = cj + dj;
+              if (i >= 0 && j >= 0 && i < this.gw && j < this.gh && keep[j * this.gw + i]) hit = 1;
+            }
+          }
+          flags[p] = hit;
+          if (hit && inside[p]) flagged++;
+        }
+        return { flags, share: flagged / inFrame, found: found / inFrame, inFrame };
+      }
+      /** The samples a map covers, per aligner level (align's `exclude`). */
+      sampleMask(map) {
+        return this.sampleCell.map((cells) => {
+          const out = new Uint8Array(cells.length);
+          for (let k = 0; k < cells.length; k++) if (cells[k] >= 0 && map.flags[cells[k]]) out[k] = 1;
+          return out;
+        });
+      }
+      /** Points flagged in one map and not the other. */
+      static differ(a, b) {
+        if (!a || !b) return a === b ? 0 : Math.max(a?.flags.length ?? 0, b?.flags.length ?? 0);
+        let d = 0;
+        for (let p = 0; p < a.flags.length; p++) if (a.flags[p] !== b.flags[p]) d++;
+        return d;
+      }
+    };
     RegionTracker = class {
-      constructor(aligner, quadImg) {
+      constructor(aligner, quadImg, detector = null, matteMarginPx = 6) {
         this.aligner = aligner;
         this.quadImg = quadImg;
+        this.detector = detector;
+        this.matteMarginPx = matteMarginPx;
         this.grid = quadGrid(quadImg);
       }
       aligner;
       quadImg;
+      detector;
+      matteMarginPx;
       Hprev = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       Hprev2 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       prior = null;
@@ -46431,17 +47079,36 @@ var init_region_track = __esm({
         this.prior = null;
         this.misses = 0;
       }
-      step(gray) {
-        const pyr = pyramid(gray, this.aligner.levels.length);
+      /**
+       * `frame`: the image (or one per channel, as the aligner was made); `rgba`: the frame as rendered, for the
+       * occluder detector; `matte`: a hand-drawn matte of what is in front in this frame (alpha, frame image px).
+       */
+      step(frame, rgba, matte) {
+        const pyr = this.aligner.pyramids(frame);
         let pred = this.Hprev;
         const inv2 = invertH(this.Hprev2);
         if (inv2) pred = mulH(this.Hprev, mulH(inv2, this.Hprev));
+        const det = this.detector && rgba ? this.detector : null;
+        let map = det ? det.detect(rgba, pred) : null;
+        if (map && map.share > OCCLUDER_MAX_SHARE) map = null;
+        const matteAt = (H) => matte ? matteExclude(this.aligner, matte, H, this.matteMarginPx) : null;
+        const exclude = unionExclude(map && det ? det.sampleMask(map) : null, matteAt(pred));
         const tries = [pred];
         if (inv2 && pred.some((v, i) => Math.abs(v - this.Hprev[i]) > 1e-9)) tries.push(this.Hprev);
         let best = null;
         let why = "";
-        for (const start of tries) {
-          const r = this.aligner.align(pyr, start, this.prior);
+        let model = "perspective";
+        const prior = this.detector ? null : this.prior;
+        const attempts = [
+          ...tries.map((start) => ({ start, model: "perspective", prior: prior !== null })),
+          ...prior ? [{ start: pred, model: "perspective", prior: false }] : [],
+          { start: pred, model: "affine", prior: prior !== null },
+          { start: pred, model: "similarity", prior: prior !== null }
+        ];
+        const accept = (r) => !this.shapeOk(r.H) && verdict(r) && !this.jumped(r.H, pred);
+        for (const at of attempts) {
+          if (at.model !== "perspective" && !(best && best.ncc >= VERDICT_NCC && best.coverage >= VERDICT_COVERAGE)) break;
+          const r = this.aligner.align(pyr, at.start, at.prior ? prior : null, void 0, at.model, exclude);
           if ("failed" in r) {
             why = r.failed;
             continue;
@@ -46455,6 +47122,7 @@ var init_region_track = __esm({
           const jump = verdict(r) ? this.jumped(r.H, pred) : null;
           if (verdict(r) && !jump) {
             best = r;
+            model = at.model;
             why = "";
             break;
           }
@@ -46466,22 +47134,51 @@ var init_region_track = __esm({
           if (!best || r.ncc > best.ncc) best = r;
           why = verdictWhy(r);
         }
+        let occluded = map ? map.share : det ? 0 : null;
+        if (best && !why && (det || matte)) {
+          const again = det ? det.detect(rgba, best.H) : null;
+          const useAgain = again && again.share <= OCCLUDER_MAX_SHARE ? again : null;
+          const changed = det ? OccluderDetector.differ(useAgain, map) > 0 : false;
+          if (changed || matte) {
+            const from = Math.min(1, this.aligner.levels.length - 1);
+            const ex2 = unionExclude(useAgain && det ? det.sampleMask(useAgain) : null, matteAt(best.H));
+            const r214 = this.aligner.align(pyr, best.H, prior, from, model, ex2);
+            if (!("failed" in r214) && accept(r214)) {
+              const first = best;
+              r214.weights = r214.weights.map((w, l) => l > from ? first.weights[l] : w);
+              best = r214;
+              if (useAgain) occluded = useAgain.share;
+            }
+          }
+        }
         if (best && !why) {
           this.prior = best.weights;
           this.Hprev2 = this.Hprev;
           this.Hprev = best.H;
           this.misses = 0;
-          return { ok: true, H: best.H, ncc: best.ncc, coverage: best.coverage, expected_px: this.aligner.expectedError(best, this.grid), cells: best.cells, misses: 0 };
+          return {
+            ok: true,
+            H: best.H,
+            ncc: best.ncc,
+            coverage: best.coverage,
+            expected_px: this.aligner.expectedError(best, this.grid),
+            cells: best.cells,
+            model,
+            occluded,
+            misses: 0,
+            ...model !== "perspective" ? { note: `solved as ${model === "affine" ? "an affine" : "a similarity"} on top of the motion so far: too little of the surface was visible to fix its perspective` } : {}
+          };
         }
         this.Hprev2 = this.Hprev;
         this.misses++;
-        return { ok: false, H: this.Hprev, ncc: best ? best.ncc : null, coverage: best ? best.coverage : null, expected_px: null, cells: best ? best.cells : null, note: why || "the region could not be aligned", misses: this.misses };
+        return { ok: false, H: this.Hprev, ncc: best ? best.ncc : null, coverage: best ? best.coverage : null, expected_px: null, cells: best ? best.cells : null, model: null, occluded, note: why || "the region could not be aligned", misses: this.misses };
       }
       /**
        * A fit that lands far from where the motion was going is a wrong solution that happened to match a
-       * few cells (seen: a laptop screen half out of frame "found" 800 px away). Allowed: 30% of the
-       * surface's size per frame since the last good one (up to its full size), plus 20 px, and an area
-       * change under 2.5 times.
+       * few cells (seen: a laptop screen half out of frame "found" 800 px away; a hand leaving a screen's
+       * corner bent that corner 20 px in while the rest held). Allowed: on average 30% of the surface's size
+       * per frame since the last good one (up to its full size) plus 20 px; any one corner 4% of the size per
+       * frame plus 3 px beyond the others' shift; an area change under 2.5 times.
        */
       jumped(H, pred) {
         const a = this.quadImg.map((p) => applyH(H, p));
@@ -46494,6 +47191,11 @@ var init_region_track = __esm({
         const size = Math.max(Math.hypot(qb[0][0] - qb[2][0], qb[0][1] - qb[2][1]), Math.hypot(qb[1][0] - qb[3][0], qb[1][1] - qb[3][1]));
         const allowed = Math.min(1, 0.3 * (1 + this.misses)) * size + 20;
         if (d > allowed) return `the fit jumped ${Math.round(d)} px from where the motion was going (more than ${Math.round(allowed)} px): a wrong match`;
+        const sx = qa.reduce((t, p, i) => t + p[0] - qb[i][0], 0) / 4;
+        const sy = qa.reduce((t, p, i) => t + p[1] - qb[i][1], 0) / 4;
+        const own = Math.max(...qa.map((p, i) => Math.hypot(p[0] - qb[i][0] - sx, p[1] - qb[i][1] - sy)));
+        const ownAllowed = Math.min(1, 0.04 * (1 + this.misses)) * size + 3;
+        if (own > ownAllowed) return `one corner moved ${Math.round(own)} px against the others in one frame (more than ${Math.round(ownAllowed)} px): a wrong match`;
         const area = (q) => Math.abs(q.reduce((s, p, i) => s + p[0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * p[1], 0)) / 2;
         const ratio = area(qa) / Math.max(1e-9, area(qb));
         if (!(ratio < 2.5 && ratio > 0.4)) return `the surface's area changed ${Math.round(ratio * 100) / 100} times in one frame: a wrong match`;
@@ -46507,7 +47209,7 @@ var init_region_track = __esm({
       }
     };
     verdict = (r) => r.ncc >= VERDICT_NCC && r.coverage >= VERDICT_COVERAGE && cellsAgree(r.cells);
-    round23 = (v) => Math.round(v * 100) / 100;
+    round24 = (v) => Math.round(v * 100) / 100;
   }
 });
 
@@ -46620,7 +47322,7 @@ function fitLine(pts, tol = 1) {
   let line = totalLeastSquares(use);
   for (let it = 0; it < 4; it++) {
     const res = pts.map((p) => distToLine(p, line.c, line.dir));
-    const thr = Math.max(tol, 2.5 * 1.4826 * median4(res));
+    const thr = Math.max(tol, 2.5 * 1.4826 * median5(res));
     const next = pts.filter((_, i) => res[i] <= thr);
     if (next.length < 6 || next.length === use.length) break;
     use = next;
@@ -46635,12 +47337,12 @@ function intersectLines(a, b) {
   const t = ((b.c[0] - a.c[0]) * b.dir[1] - (b.c[1] - a.c[1]) * b.dir[0]) / cr;
   return [a.c[0] + a.dir[0] * t, a.c[1] + a.dir[1] * t];
 }
-var clamp2, median4, MIN_EDGE, distToLine;
+var clamp2, median5, MIN_EDGE, distToLine;
 var init_edges = __esm({
   "src/tools/ext/edges.ts"() {
     "use strict";
     clamp2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    median4 = (a) => {
+    median5 = (a) => {
       if (a.length === 0) return 0;
       const s = [...a].sort((x, y) => x - y);
       const m = s.length >> 1;
@@ -46710,34 +47412,20 @@ function sampleKey(img, quad) {
   const innerT = Math.max(0.025, 3 * mad);
   return { chroma, luma: med(ls), inner: innerT, outer: innerT + Math.max(0.03, 0.5 * innerT), rgb: [med(raw[0]), med(raw[1]), med(raw[2])] };
 }
-function keyAlpha(img, key, box) {
-  const { width: w, height: h } = img;
-  const out = new Float32Array(w * h);
-  const x0 = Math.max(0, Math.floor(box[0]));
-  const y0 = Math.max(0, Math.floor(box[1]));
-  const x1 = Math.min(w - 1, Math.ceil(box[2]));
-  const y1 = Math.min(h - 1, Math.ceil(box[3]));
-  const span = key.outer - key.inner;
-  const dark0 = 0.15 * key.luma;
-  const dark1 = 0.3 * key.luma;
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const i = y * w + x;
-      const r = img.data[i * 4];
-      const g = img.data[i * 4 + 1];
-      const b = img.data[i * 4 + 2];
-      const s = r + g + b;
-      if (s <= 0) continue;
-      const d = Math.hypot(r / s - key.chroma[0], g / s - key.chroma[1]);
-      let a = d <= key.inner ? 1 : d >= key.outer ? 0 : (key.outer - d) / span;
-      if (a > 0) {
-        const l = luma(r, g, b);
-        if (l < dark1) a *= l <= dark0 ? 0 : (l - dark0) / (dark1 - dark0);
-      }
-      out[i] = 255 * a;
-    }
+function keyPresenceOf(key, r, g, b) {
+  const s = r + g + b;
+  if (!(s > 0)) return 0;
+  const d = Math.hypot(r / s - key.chroma[0], g / s - key.chroma[1]);
+  const near10 = Math.max(0.08, key.outer);
+  const far = near10 + 0.06;
+  let a = d <= near10 ? 1 : d >= far ? 0 : (far - d) / (far - near10);
+  if (a > 0) {
+    const l = luma(r, g, b);
+    const dark0 = 0.15 * key.luma;
+    const dark1 = 0.25 * key.luma;
+    if (l < dark1) a *= l <= dark0 ? 0 : (l - dark0) / (dark1 - dark0);
   }
-  return { width: w, height: h, data: out };
+  return a;
 }
 function keyStrength(img, key, box) {
   const { width: w, height: h } = img;
@@ -46825,54 +47513,7 @@ function fitScreenQuad(strength, pred, band) {
   if (!chk.ok) return { ok: false, corners, sides, expected_px: null, why: `the outline is not a quad: ${chk.reason}` };
   return { ok: true, corners, sides, expected_px: ex / 4 };
 }
-function keyedShare(alpha, q) {
-  let n = 0;
-  let on = 0;
-  for (let i = 0; i < 20; i++) {
-    for (let j = 0; j < 20; j++) {
-      const s = (i + 0.5) / 20;
-      const t = (j + 0.5) / 20;
-      const top = [q[0][0] + (q[1][0] - q[0][0]) * s, q[0][1] + (q[1][1] - q[0][1]) * s];
-      const bot = [q[3][0] + (q[2][0] - q[3][0]) * s, q[3][1] + (q[2][1] - q[3][1]) * s];
-      const x = Math.round(top[0] + (bot[0] - top[0]) * t);
-      const y = Math.round(top[1] + (bot[1] - top[1]) * t);
-      if (x < 0 || y < 0 || x >= alpha.width || y >= alpha.height) continue;
-      n++;
-      if (alpha.data[y * alpha.width + x] >= 128) on++;
-    }
-  }
-  return n ? on / n : 0;
-}
-function redetectQuad(alpha, around) {
-  const c = centroid2(around);
-  const grown = around.map((p) => [c[0] + (p[0] - c[0]) * 1.5, c[1] + (p[1] - c[1]) * 1.5]);
-  const xs = grown.map((p) => p[0]);
-  const ys = grown.map((p) => p[1]);
-  const x0 = Math.max(0, Math.floor(Math.min(...xs)));
-  const x1 = Math.min(alpha.width - 1, Math.ceil(Math.max(...xs)));
-  const y0 = Math.max(0, Math.floor(Math.min(...ys)));
-  const y1 = Math.min(alpha.height - 1, Math.ceil(Math.max(...ys)));
-  const dirs = around.map((p) => {
-    const d = Math.hypot(p[0] - c[0], p[1] - c[1]) || 1;
-    return [(p[0] - c[0]) / d, (p[1] - c[1]) / d];
-  });
-  const best = [null, null, null, null];
-  let count = 0;
-  for (let y = y0; y <= y1; y += 2) {
-    for (let x = x0; x <= x1; x += 2) {
-      if (alpha.data[y * alpha.width + x] < 128) continue;
-      count++;
-      for (let k = 0; k < 4; k++) {
-        const v = (x - c[0]) * dirs[k][0] + (y - c[1]) * dirs[k][1];
-        if (!best[k] || v > best[k].v) best[k] = { v, p: [x, y] };
-      }
-    }
-  }
-  if (count < 200 || best.some((b) => b === null)) return null;
-  const q = best.map((b) => b.p);
-  return quadCheck(q).ok ? q : null;
-}
-var luma, centroid2, MIN_SIDE_SUPPORT, ScreenTracker;
+var luma, centroid2, MIN_SIDE_SUPPORT;
 var init_screen_track = __esm({
   "src/tools/ext/screen-track.ts"() {
     "use strict";
@@ -46881,97 +47522,6 @@ var init_screen_track = __esm({
     luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
     centroid2 = (q) => [q.reduce((s, p) => s + p[0], 0) / q.length, q.reduce((s, p) => s + p[1], 0) / q.length];
     MIN_SIDE_SUPPORT = 0.25;
-    ScreenTracker = class {
-      constructor(key, refQuad, band = 12) {
-        this.key = key;
-        this.refQuad = refQuad;
-        this.band = band;
-      }
-      key;
-      refQuad;
-      band;
-      Hprev = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-      Hprev2 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-      misses = 0;
-      restore(last, prev) {
-        this.Hprev = last.slice();
-        this.Hprev2 = (prev ?? last).slice();
-        this.misses = 0;
-      }
-      quadOf(H) {
-        const q = this.refQuad.map((p) => applyH(H, p));
-        return q.some((p) => p === null) ? null : q;
-      }
-      step(img) {
-        let pred = this.Hprev;
-        const inv2 = invertH(this.Hprev2);
-        if (inv2) pred = mulH(this.Hprev, mulH(inv2, this.Hprev));
-        const predQ = this.quadOf(pred) ?? this.quadOf(this.Hprev);
-        const lastQ = this.quadOf(this.Hprev);
-        if (!predQ || !lastQ) return this.miss("the screen's quad lands behind the plane at infinity");
-        const all = [...predQ, ...lastQ];
-        const c = centroid2(lastQ);
-        const xs = all.map((p) => c[0] + (p[0] - c[0]) * 1.5);
-        const ys = all.map((p) => c[1] + (p[1] - c[1]) * 1.5);
-        const pad2 = 2 * this.band + 4;
-        const box = [Math.min(...xs) - pad2, Math.min(...ys) - pad2, Math.max(...xs) + pad2, Math.max(...ys) + pad2];
-        const alpha = keyAlpha(img, this.key, box);
-        const strength = keyStrength(img, this.key, box);
-        const tries = [{ q: predQ, band: this.band }, { q: lastQ, band: 2 * this.band }];
-        let why = "";
-        let fit = null;
-        for (let k = 0; k < 3 && !(fit && fit.ok); k++) {
-          let t = tries[k];
-          if (k === 2) {
-            const re = redetectQuad(alpha, lastQ);
-            if (!re) break;
-            t = { q: re, band: 2 * this.band };
-          }
-          const f = fitScreenQuad(strength, t.q, t.band);
-          if (!f.ok) {
-            why = f.why ?? "the outline was not found";
-            continue;
-          }
-          const jump = this.jumped(f.corners, predQ);
-          if (jump) {
-            why = jump;
-            continue;
-          }
-          fit = f;
-        }
-        if (!fit || !fit.ok) return this.miss(why || "the outline was not found");
-        const sol = solveModel("perspective", this.refQuad, fit.corners);
-        if (!sol) return this.miss("the outline's corners are degenerate");
-        this.Hprev2 = this.Hprev;
-        this.Hprev = sol.H;
-        this.misses = 0;
-        return {
-          ok: true,
-          H: sol.H,
-          corners: fit.corners,
-          expected_px: fit.expected_px,
-          support: Math.min(...fit.sides.map((s) => s.support)),
-          coverage: keyedShare(alpha, fit.corners),
-          misses: 0
-        };
-      }
-      miss(note) {
-        this.Hprev2 = this.Hprev;
-        this.misses++;
-        return { ok: false, H: this.Hprev, corners: null, expected_px: null, support: null, coverage: null, note, misses: this.misses };
-      }
-      jumped(q, pred) {
-        let d = 0;
-        for (let i = 0; i < 4; i++) d += Math.hypot(q[i][0] - pred[i][0], q[i][1] - pred[i][1]) / 4;
-        const size = Math.max(Math.hypot(pred[0][0] - pred[2][0], pred[0][1] - pred[2][1]), Math.hypot(pred[1][0] - pred[3][0], pred[1][1] - pred[3][1]));
-        const allowed = Math.min(1, 0.3 * (1 + this.misses)) * size + 20;
-        if (d > allowed) return `the outline jumped ${Math.round(d)} px from where the screen was going: a wrong match`;
-        const area = (p) => Math.abs(p.reduce((s, v, i) => s + v[0] * p[(i + 1) % 4][1] - p[(i + 1) % 4][0] * v[1], 0)) / 2;
-        const ratio = area(q) / Math.max(1e-9, area(pred));
-        if (!(ratio < 2.5 && ratio > 0.4)) return `the screen's area changed ${Math.round(ratio * 100) / 100} times in one frame: a wrong match`;
-        return null;
-      }
-    };
   }
 });
 
@@ -47714,6 +48264,24 @@ function readInfo(got) {
     ...got.layer ? { layer: got.layer } : {}
   };
 }
+function matteOf(png) {
+  const n = png.width * png.height;
+  let seeThrough = false;
+  for (let i = 0; i < n && !seeThrough; i++) if (png.data[i * 4 + 3] < 250) seeThrough = true;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    out[i] = seeThrough ? png.data[o + 3] : 0.2126 * png.data[o] + 0.7152 * png.data[o + 1] + 0.0722 * png.data[o + 2];
+  }
+  return { width: png.width, height: png.height, data: out };
+}
+function screenArea(corners, minBand = 0) {
+  const cx = corners.reduce((t, p) => t + p[0], 0) / corners.length;
+  const cy = corners.reduce((t, p) => t + p[1], 0) / corners.length;
+  const near10 = Math.min(...corners.map((p) => Math.hypot(p[0] - cx, p[1] - cy)));
+  const g = Math.max(1.04, near10 > 0 ? 1 + minBand / near10 : 1.04);
+  return corners.map((p) => [r4(cx + (p[0] - cx) * g), r4(cy + (p[1] - cy) * g)]);
+}
 function quadOfRegion(r) {
   if ("polygon" in r && r.polygon.length === 4) {
     const q = r.polygon.map((p) => [p[0], p[1]]);
@@ -47921,7 +48489,7 @@ function flagUnreliableFrames(track) {
   const ex = track.frames.filter((f) => f.ok && typeof f.expected_px === "number" && f.time !== track.ref_time).map((f) => f.expected_px).sort((a, b) => a - b);
   if (ex.length < 5) return [];
   const typical = ex[Math.floor(ex.length / 2)];
-  const limit = Math.max(2, 8 * typical);
+  const limit = Math.max(Math.max(1, track.comp_size[1] / 1080), 6 * typical);
   const flagged = [];
   for (const f of track.frames) {
     if (f.ok && typeof f.expected_px === "number" && f.expected_px > limit) {
@@ -47930,6 +48498,44 @@ function flagUnreliableFrames(track) {
       flagged.push(f.time);
     }
   }
+  return flagged;
+}
+function pathCheckOf(track) {
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  const samples = track.frames.filter((f) => f.ok && f.H).map((f) => ({ frame: Math.round(f.time * track.fps), points: quad.map((p) => applyH(f.H, p)) })).filter((x) => x.points.every((p) => p !== null));
+  return { res: checkPaths(samples, { compHeight: track.comp_size[1] }), quad };
+}
+function pathReport(res, nCorners, flagged) {
+  const per = {};
+  res.per_corner.forEach((c, k) => {
+    per[cornerName(k, nCorners)] = { worst_jump_px: c.worst_jump_px, worst_jump_frame: c.worst_jump_frame, jumps: c.jumps, worst_off_px: c.worst_off_px, worst_off_frame: c.worst_off_frame, off_frames: c.off_frames };
+  });
+  return {
+    frames_checked: res.frames_checked,
+    corner_noise_px: res.corner_sigma_px,
+    jump_limit_px: res.jump_limit_px,
+    off_limit_px: res.off_limit_px,
+    ...flagged !== null ? { frames_flagged: flagged } : { frames_over: new Set(res.flags.map((f) => f.frame)).size },
+    per_corner: per,
+    worst: res.flags.slice(0, 8).map((f) => ({ frame: f.frame, kind: f.kind, px: f.px })),
+    sharpest_move: res.whole
+  };
+}
+function flagPathJumps(track) {
+  const { res, quad } = pathCheckOf(track);
+  if (!res) return [];
+  const byFrame = new Map(res.flags.map((fl) => [fl.frame, fl]));
+  const flagged = [];
+  for (const f of track.frames) {
+    if (!f.ok || Math.abs(f.time - track.ref_time) < 1e-6) continue;
+    const fl = byFrame.get(Math.round(f.time * track.fps));
+    if (!fl) continue;
+    f.ok = false;
+    const what = fl.kind === "jump" ? `jumps ${fl.px} px against the frames on either side` : `is ${fl.px} px off the path of the frames around it`;
+    f.note = `the surface's shape (its corners against each other, the camera's move taken out) ${what} (limit ${fl.limit_px} px): the track bent it on its own (an occluder's edge taken for the surface's, a second parallel edge, a reflection); not written`;
+    flagged.push(f.time);
+  }
+  if (track.tracking) track.tracking.path_check = pathReport(res, quad.length, flagged.length);
   return flagged;
 }
 function slidingPoints(track) {
@@ -47943,19 +48549,19 @@ function slidingPoints(track) {
       if (p && q) per[k].push(Math.hypot(p[0] - q[0], p[1] - q[1]));
     });
   }
-  const median8 = (xs) => {
+  const median9 = (xs) => {
     const v = xs.slice().sort((a, b) => a - b);
     return v.length ? v[Math.floor(v.length / 2)] : 0;
   };
   const all = per.flat();
-  const noise = Math.max(0.15, median8(all) * 1.4826);
+  const noise = Math.max(0.15, median9(all) * 1.4826);
   const limit = Math.max(1.5, 5 * noise);
   const out = [];
   per.forEach((res, k) => {
     if (res.length < 5) return;
     const late2 = res.slice(Math.floor(res.length / 2));
     const off = res.filter((e) => e > limit).length;
-    if (median8(late2) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r26(median8(res)), frames_off_plane: off, frames: res.length });
+    if (median9(late2) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r26(median9(res)), frames_off_plane: off, frames: res.length });
   });
   return out;
 }
@@ -48078,6 +48684,12 @@ function trackSummary(track, maxFrames = 500) {
     error_note: EXPECTED_ERROR_NOTE,
     corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
     ...(() => {
+      const stored = track.tracking?.path_check;
+      if (stored) return { path_check: stored, path_check_note: PATH_CHECK_NOTE };
+      const { res, quad } = pathCheckOf(track);
+      return res ? { path_check: pathReport(res, quad.length, null), path_check_note: PATH_CHECK_NOTE } : {};
+    })(),
+    ...(() => {
       const advice = modelAdvice(track);
       return advice ? { model_advice: advice } : {};
     })(),
@@ -48140,6 +48752,68 @@ function drawTrackSheet(tiles, o) {
     blit(sheet, d, x, 0);
     x += d.width + gap;
   }
+  return sheet;
+}
+function drawCornerCloseups(rows, quad, scale) {
+  const Z = 96;
+  const gap = 4;
+  const head3 = 14;
+  const diag = Math.max(Math.hypot(quad[0][0] - quad[2][0], quad[0][1] - quad[2][1]), Math.hypot(quad[1][0] - quad[3][0], quad[1][1] - quad[3][1]));
+  const R = Math.max(8, Math.round(0.03 * diag));
+  const tileW = 2 * Z + gap;
+  const tileH = 2 * Z + gap + head3;
+  const cols = Math.max(1, ...rows.map((r) => r.length));
+  const sheet = createCanvas(cols * (tileW + gap), Math.max(1, rows.length) * (tileH + gap), [24, 24, 24, 255]);
+  const cyan = [0, 220, 255, 255];
+  const red = [255, 60, 60, 255];
+  const pos = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1]
+  ];
+  rows.forEach((row, ri) => {
+    const centres = quad.map((c) => {
+      const ps = row.map((t) => t.frame.H ? applyH(t.frame.H, c) : null).filter((p) => p !== null);
+      return ps.length ? [ps.reduce((a, p) => a + p[0], 0) / ps.length, ps.reduce((a, p) => a + p[1], 0) / ps.length] : null;
+    });
+    row.forEach((t, ci) => {
+      const x0 = ci * (tileW + gap);
+      const y0 = ri * (tileH + gap);
+      const col = t.frame.ok ? cyan : red;
+      const corners = quad.map((c) => t.frame.H ? applyH(t.frame.H, c) : null);
+      for (let k = 0; k < Math.min(4, quad.length); k++) {
+        const ctr = centres[k];
+        const tx = x0 + pos[k][0] * (Z + gap);
+        const ty = y0 + head3 + pos[k][1] * (Z + gap);
+        const r = R * scale;
+        if (!ctr) continue;
+        const ax = Math.round(ctr[0] * scale - r);
+        const ay = Math.round(ctr[1] * scale - r);
+        if (ax < 0 || ay < 0 || ax + 2 * r > t.image.width || ay + 2 * r > t.image.height) {
+          drawLabel(sheet, "out", tx + 4, ty + 4, 1, [200, 200, 200, 255], [40, 40, 40, 255], 2);
+          continue;
+        }
+        const zoom = scaleNearest(cropImage(t.image, ax, ay, Math.round(2 * r), Math.round(2 * r)), Z, Z);
+        const f = Z / Math.round(2 * r);
+        const to = (p) => [(p[0] * scale - ax) * f, (p[1] * scale - ay) * f];
+        const c0 = corners[k];
+        if (c0) {
+          for (const nb of [(k + 1) % 4, (k + 3) % 4]) {
+            const c1 = corners[nb];
+            if (!c1) continue;
+            const a = to(c0);
+            const b = to(c1);
+            drawLine(zoom, a[0], a[1], b[0], b[1], 1, col);
+          }
+          const p = to(c0);
+          drawCross(zoom, p[0], p[1], 5, 1, col);
+        }
+        blit(sheet, zoom, tx, ty);
+      }
+      drawLabel(sheet, t.label, x0, y0, 1, [16, 16, 16, 255], t.frame.ok ? [255, 214, 0, 255] : [255, 120, 120, 255], 2);
+    });
+  });
   return sheet;
 }
 function writeSheet(framesDir, tag, png) {
@@ -48208,15 +48882,15 @@ function buildLayerKeys(a) {
     }
     times.push(f.time);
     if (pts) {
-      pin.ul.push(round24(pts[0]));
-      pin.ur.push(round24(pts[1]));
-      pin.ll.push(round24(pts[2]));
-      pin.lr.push(round24(pts[3]));
+      pin.ul.push(round25(pts[0]));
+      pin.ur.push(round25(pts[1]));
+      pin.ll.push(round25(pts[2]));
+      pin.lr.push(round25(pts[3]));
     }
     if (dec) {
-      tr.position.push(round24(dec.position));
+      tr.position.push(round25(dec.position));
       tr.rotation.push(dec.rotation_deg);
-      tr.scale.push(round24(dec.scale_pct));
+      tr.scale.push(round25(dec.scale_pct));
     }
   });
   const out = { times, skipped, max_fit_px: r26(maxFit) };
@@ -48234,7 +48908,7 @@ function buildNullKeys(a) {
       if (!p && f.H) p = applyH(f.H, rp);
       if (!p) continue;
       times.push(f.time);
-      position.push(round24(p));
+      position.push(round25(p));
     }
     if (times.length > 0) out.push({ name: `${a.prefix} ${k + 1}`.slice(0, 200), times, position });
   });
@@ -48249,7 +48923,7 @@ function buildNullKeys(a) {
       if (!f.H) continue;
       const d = decomposeSimilarity(f.H, pivot);
       times.push(f.time);
-      position.push(round24(d.position));
+      position.push(round25(d.position));
       rot.push(d.rotation_deg);
       scale.push([r4(d.scale_pct), r4(d.scale_pct)]);
     }
@@ -48504,8 +49178,12 @@ async function trackMulti(ctx, args) {
   const storedOpts = stored?.tracking?.options;
   const isolate = args.isolate_layers ?? storedOpts?.isolate_layers;
   if (isolate && !args.expect) throw new PlanarError("bad_args", "isolate_layers writes to the project (a temporary comp), so `expect` is required.");
+  const holdout = args.holdout_layers ?? storedOpts?.holdout_layers;
+  if (holdout && !args.expect) throw new PlanarError("bad_args", "holdout_layers writes to the project (temporary comps), so `expect` is required.");
+  const holdoutMethod = args.region ? "region" : args.screen ? "screen" : storedOpts?.method ?? "points";
+  if (holdout && holdoutMethod === "points") throw new PlanarError("bad_args", "holdout_layers works with region and screen tracks: points are not fitted per pixel.");
   const expect = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
-  if (isolate && expect) ctx.quarantine.assertClear();
+  if ((isolate || holdout) && expect) ctx.quarantine.assertClear();
   const ran = await queued2(ctx, label2, opId, async () => {
     const comp = await readComp2(ctx, opId, args.comp_id, isolate, toolName);
     const fps = comp.fps > 0 ? comp.fps : 25;
@@ -48544,6 +49222,7 @@ async function trackMulti(ctx, args) {
       pre_blur: args.pre_blur ?? 0,
       channel: args.channel,
       ...args.isolate_layers ? { isolate_layers: args.isolate_layers } : {},
+      ...args.holdout_layers ? { holdout_layers: args.holdout_layers } : {},
       method: args.region ? "region" : args.screen ? "screen" : "points",
       ...args.region ? { area: args.region.area, exclude: args.region.exclude ?? [] } : { exclude: args.auto_points?.exclude ?? [] }
     };
@@ -48557,9 +49236,25 @@ async function trackMulti(ctx, args) {
     let checkpoint = null;
     let sessionFields = {};
     let showLayers = null;
+    let matteLayers = null;
     if (isolate && expect) {
       showLayers = comp.layers.map((l) => ({ index: l.index, id: l.id }));
       if (showLayers.length === 0) throw new PlanarError("not_found", "isolate_layers matched no layer.");
+    }
+    if (holdout && expect) {
+      const hc = await readComp2(ctx, `${opId}h`, args.comp_id, holdout, toolName);
+      matteLayers = hc.layers.map((l) => ({ index: l.index, id: l.id }));
+      if (matteLayers.length === 0) throw new PlanarError("not_found", "holdout_layers matched no layer.");
+      if (!showLayers) {
+        const nAll = Number(comp.num_layers ?? 0);
+        if (nAll > 100) throw new PlanarError("bad_args", `The comp has ${nAll} layers; with holdout_layers, name the plate layers in isolate_layers.`);
+        const all = await readComp2(ctx, `${opId}a`, args.comp_id, Array.from({ length: nAll }, (_, i) => ({ index: i + 1 })), toolName);
+        const ids = new Set(matteLayers.map((l) => l.id));
+        showLayers = all.layers.filter((l) => l.enabled && !ids.has(l.id)).map((l) => ({ index: l.index, id: l.id }));
+        if (showLayers.length === 0) throw new PlanarError("not_found", "No layer is on but the holdout layers: nothing to track.");
+      }
+    }
+    if ((isolate || holdout) && expect) {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       checkpoint = await autoCheckpoint(ctx, guard, toolName);
@@ -48568,9 +49263,9 @@ async function trackMulti(ctx, args) {
     }
     let rebuildRenders = 0;
     let mustAdvance = false;
-    const chunk = async (renderCompId) => {
-      const snap = async (time, index, charge = true) => {
-        const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: index, framesDir, toolName });
+    const chunk = async (renderCompId, matteCompId = null) => {
+      const snapFrom = async (compId, time, index, charge = true) => {
+        const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName });
         if (charge) budget.spend();
         else rebuildRenders++;
         try {
@@ -48579,6 +49274,7 @@ async function trackMulti(ctx, args) {
           fs45.rmSync(s.path, { force: true });
         }
       };
+      const snap = (time, index, charge = true) => snapFrom(renderCompId, time, index, charge);
       const cached2 = stored ? LIVE.get(stored.track_id) : void 0;
       let refPng = null;
       let refGray = null;
@@ -48606,6 +49302,8 @@ async function trackMulti(ctx, args) {
         if (!fit.ok) throw new PlanarError("bad_args", `The screen's outline was not found near those corners at ref_time: ${fit.why}. Give the corners within about 10 px of where the key colour ends.`);
         o.screen_key = key;
         refPoints = fit.corners.map((p) => [r4((p[0] + 0.5) / scale), r4((p[1] + 0.5) / scale)]);
+        o.area = { polygon: screenArea(refPoints, 6 / scale) };
+        o.exclude = [];
       } else if (args.points) {
         refPoints = args.points;
       } else {
@@ -48680,10 +49378,22 @@ async function trackMulti(ctx, args) {
       }
       const opts = mkOpts();
       let aligner = null;
+      let detector = null;
+      if (o.method === "screen" && !o.area) throw new PlanarError("refused", "This screen track was made by an older version of the tool, which followed the screen's edges another way; it cannot be continued. Track it again.");
       if ((!state.forward.done && !fwd || !state.backward.done && !bwd) && o.area) {
         try {
-          aligner = new RegionAligner(refGray, regionMask(refGray.width, refGray.height, scale, o.area, o.exclude ?? [], 0));
+          const mask = regionMask(refGray.width, refGray.height, scale, o.area, o.exclude ?? [], 0);
+          if (o.method === "screen") {
+            const key = o.screen_key;
+            aligner = new RegionAligner([refGray, keyStrength(refPng, key, [0, 0, refPng.width, refPng.height])], mask, { verdictChannels: [1] });
+            detector = new OccluderDetector(refPng, mask, aligner, (r, g, b) => keyPresenceOf(key, r, g, b));
+          } else {
+            aligner = new RegionAligner(refGray, mask);
+          }
         } catch (err) {
+          if (o.method === "screen") {
+            throw new PlanarError("bad_args", `The screen cannot be followed: ${errMessage5(err)}. Give its corners where the key colour ends, with the screen's rim and some of its frame in the picture.`);
+          }
           if (o.method === "region") {
             throw new PlanarError(
               "bad_args",
@@ -48701,7 +49411,12 @@ async function trackMulti(ctx, args) {
           return d;
         }
         if (o.method === "screen") {
-          const d = new ScreenDirection(o.screen_key, quad, scale, maxMisses);
+          const key = o.screen_key;
+          const chans = (g, rgba) => {
+            if (!rgba) throw new Error("a screen track needs the frame's colours");
+            return [g, keyStrength(rgba, key, [0, 0, rgba.width, rgba.height])];
+          };
+          const d = new RegionDirection(aligner, quad, scale, maxMisses, chans, detector);
           if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
           return d;
         }
@@ -48733,8 +49448,10 @@ async function trackMulti(ctx, args) {
         for (; i < times.length; i++) {
           if (!mustAdvance && budget.exhausted()) break;
           let png;
+          let matte;
           try {
             png = await snap(times[i], (dir === "forward" ? 1 : 100001) + i);
+            if (matteCompId !== null) matte = matteOf(await snapFrom(matteCompId, times[i], (dir === "forward" ? 200001 : 300001) + i));
             mustAdvance = false;
           } catch (err) {
             run_.renderError = errMessage5(err);
@@ -48742,7 +49459,7 @@ async function trackMulti(ctx, args) {
             break;
           }
           await yieldLoop();
-          const res = mt.step(prep(png), times[i], png);
+          const res = mt.step(prep(png), times[i], png, matte);
           await yieldLoop();
           if (res.stop) {
             ds.done = true;
@@ -48784,10 +49501,49 @@ async function trackMulti(ctx, args) {
       };
       remember(track2.track_id, Object.assign({ forward: fwd, backward: bwd }, { scale }));
       track2.tracking.options = o;
-      if (track2.tracking.forward.done && track2.tracking.backward.done) flagUnreliableFrames(track2);
+      if (track2.tracking.forward.done && track2.tracking.backward.done) {
+        flagUnreliableFrames(track2);
+        flagPathJumps(track2);
+      }
       saveTrack(track2);
       let previewPath;
       let previewError;
+      let jumpPreviewPath;
+      let previewRenders = 0;
+      const pcheck = track2.tracking?.path_check;
+      if (args.preview && pcheck && track2.tracking.forward.done && track2.tracking.backward.done) {
+        try {
+          const events = [];
+          for (const w of pcheck.worst ?? []) if (events.length < 2 && events.every((e) => Math.abs(e - w.frame) >= 5)) events.push(w.frame);
+          if (!events.length) {
+            const top = Object.values(pcheck.per_corner ?? {}).sort((a, b) => b.worst_jump_px - a.worst_jump_px)[0];
+            if (top && top.worst_jump_frame !== null) events.push(top.worst_jump_frame);
+          }
+          const byFrame = new Map(track2.frames.map((fr) => [Math.round(fr.time * fps), fr]));
+          const rows = [];
+          for (const ev of events) {
+            const row = [];
+            for (let d = -2; d <= 2; d++) {
+              const fr = byFrame.get(ev + d);
+              if (!fr || !fr.H) continue;
+              const shot = await captureCompFrame({ ctx, opId, compId: renderCompId, time: fr.time, frameIndex: 400001 + previewRenders, framesDir, toolName });
+              previewRenders++;
+              let img;
+              try {
+                img = decodePngFile(shot.path);
+              } finally {
+                fs45.rmSync(shot.path, { force: true });
+              }
+              row.push({ image: img, frame: fr, label: `${ev + d}${fr.ok ? "" : " not ok"}` });
+              await yieldLoop();
+            }
+            if (row.length) rows.push(row);
+          }
+          if (rows.length) jumpPreviewPath = writeSheet(framesDir, `${track2.track_id}_${opId}_jumps`, drawCornerCloseups(rows, quad, scale));
+        } catch (err) {
+          previewError = errMessage5(err);
+        }
+      }
       if (args.preview) {
         try {
           const tiles = [];
@@ -48802,37 +49558,71 @@ async function trackMulti(ctx, args) {
           previewError = errMessage5(err);
         }
       }
-      return { track: track2, notes: notes2, previewPath, previewError, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
+      return { track: track2, notes: notes2, previewPath, previewError, jumpPreviewPath, previewRenders, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
     };
     let value;
-    let temp = null;
-    if (showLayers && expect) {
-      let wrapped;
-      try {
-        wrapped = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers, expect, toolName, note }, chunk);
-      } catch (err) {
-        const plateTemp = err?.plateTemp;
-        if (!plateTemp) throw err;
-        const made = await verifyPlateGone(ctx, opId, plateTemp, toolName);
-        try {
-          await noteAfterWrite(ctx, note, { addStep: true });
-        } catch {
-        }
-        return {
-          failure: {
-            error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage5(err),
-            temp: made,
-            checkpoint,
-            sessionFields
-          }
-        };
+    const temps = [];
+    const takeTemp = (err) => {
+      const t = err?.plateTemp;
+      if (t) {
+        temps.push(t);
+        delete err.plateTemp;
       }
-      value = wrapped.value;
-      temp = wrapped.temp ? await verifyPlateGone(ctx, opId, wrapped.temp, toolName) : null;
+    };
+    const plateRun2 = async (matteId) => {
+      if (!(showLayers && expect)) return chunk(args.comp_id, matteId);
+      try {
+        const w = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers, expect, toolName, note }, (id) => chunk(id, matteId));
+        if (w.temp) temps.push(w.temp);
+        return w.value;
+      } catch (err) {
+        takeTemp(err);
+        throw err;
+      }
+    };
+    const merge = (list2) => {
+      if (!list2.length) return null;
+      const bad4 = list2.find((t) => !t.removed);
+      const errs = list2.map((t) => t.error).filter(Boolean);
+      return { copy_id: (bad4 ?? list2[0]).copy_id, removed: !bad4, ...errs.length ? { error: errs.join("; ") } : {}, ...list2.length > 1 ? { copies: list2.length } : {} };
+    };
+    try {
+      if (matteLayers && expect) {
+        try {
+          const w = await withIsolatedPlate(ctx, `${opId}m`, { compId: args.comp_id, showLayers: matteLayers, expect, toolName, note }, (mid) => plateRun2(mid));
+          if (w.temp) temps.push(w.temp);
+          value = w.value;
+        } catch (err) {
+          takeTemp(err);
+          throw err;
+        }
+      } else {
+        value = await plateRun2(null);
+      }
+    } catch (err) {
+      if (!temps.length) throw err;
+      const made = [];
+      for (const t of temps) made.push(await verifyPlateGone(ctx, opId, t, toolName));
+      try {
+        await noteAfterWrite(ctx, note, { addStep: true });
+      } catch {
+      }
+      return {
+        failure: {
+          error: err instanceof PlanarError ? err.code : "failed",
+          message: errMessage5(err),
+          temp: merge(made),
+          checkpoint,
+          sessionFields
+        }
+      };
+    }
+    let temp = null;
+    if (temps.length) {
+      const made = [];
+      for (const t of temps) made.push(await verifyPlateGone(ctx, opId, t, toolName));
+      temp = merge(made);
       await noteAfterWrite(ctx, note, { addStep: true });
-    } else {
-      value = await chunk(args.comp_id);
     }
     return { ...value, temp, checkpoint, sessionFields, fps, rendersUsed: budget.used.renders, rebuildRenders };
   });
@@ -48864,12 +49654,12 @@ async function trackMulti(ctx, args) {
   const nextTime = nextDir === "forward" ? st.forward.next_time : nextDir === "backward" ? st.backward.next_time : null;
   const notes = [...ran.notes];
   const method = st.options.method ?? "points";
-  if (method === "screen") notes.push("A screen track follows where the key colour ends: the corners are where its sides' lines meet, so a corner covered by a hand is still placed from its sides. The ref_points are the snapped corners at ref_time.");
+  if (method === "screen") notes.push("A screen track aligns the screen with its rim and the inside edge of its frame to the reference frame, in its brightness and its key together (no edge is picked frame by frame, so two parallel edges at the rim cannot make it flicker); a hand or anything else in front of the key is found by its colour and left out, its edges with it. A corner out of the frame or under a hand is placed by the rest of the screen. The ref_points are the snapped corners at ref_time.");
   else if (method === "region") notes.push("The area must be one flat surface: whatever in it is at another depth (a frame's edge standing out, a shelf) moves differently and is pushed out of the fit, but a large part of it off the plane pulls the solve.");
   else notes.push("Points must lie on one plane: a point on a different depth slides against the others and the fit gets worse (see rms_px).");
   const lostDir = [st.forward, st.backward].find((d) => d.stop?.reason === "lost");
   if (lostDir && lostDir.stop) notes.push(`A direction stopped at ${r26(lostDir.stop.time)} s: ${maxMissesFor(ran.fps)} frames in a row did not line up with the surface (gone, covered, or out of frame). Frames past it are not in the track; track that part again from a reference frame inside it.`);
-  if (ran.temp) notes.push("isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
+  if (ran.temp) notes.push(ran.temp.copies && ran.temp.copies > 1 ? `The plate and the holdout mattes were rendered from ${ran.temp.copies} temporary copies of the comp, each removed again: two undo entries for each.` : "isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
   if (ran.blocked) notes.push("AE stopped responding during a render (often a modal dialog); check ae_dialogs and continue the track.");
   const baseMismatches = [];
   if (ran.temp && !ran.temp.removed) {
@@ -48898,13 +49688,17 @@ async function trackMulti(ctx, args) {
     })),
     reacquired_points_this_call: ran.reacquired,
     ...ran.previewPath ? { preview_path: ran.previewPath } : {},
+    ...ran.jumpPreviewPath ? {
+      jump_preview_path: ran.jumpPreviewPath,
+      jump_preview_note: "Close-ups of the four corners around the frames the path check flagged worst, or around the frame whose corners moved most when it flagged none (one row per stretch, frame numbers on the tiles): each corner is cropped at the same place for the whole row, so a corner that jumps moves in its tile. Cyan: written; red: not written. Look at it before trusting the track."
+    } : {},
     ...ran.previewError ? { preview_error: ran.previewError } : {},
     ...ran.renderError ? { render_error: ran.renderError } : {},
     ...ran.temp ? { temp_comp: { copy_removed: ran.temp.removed, ...ran.temp.error ? { error: ran.temp.error } : {} } } : {},
     ...ran.temp ? { checkpoint: ran.checkpoint, receipt: buildReceipt({ before: null, after: { temp_comp: ran.temp }, customMismatches: baseMismatches }), ...ran.sessionFields } : {},
     notes
   };
-  result.budget = { max_frames: args.max_frames, max_seconds: args.max_seconds, renders_this_call: ran.rendersUsed, ...ran.rebuildRenders ? { rebuild_renders: ran.rebuildRenders } : {} };
+  result.budget = { max_frames: args.max_frames, max_seconds: args.max_seconds, renders_this_call: ran.rendersUsed, ...ran.rebuildRenders ? { rebuild_renders: ran.rebuildRenders } : {}, ...ran.previewRenders ? { preview_renders: ran.previewRenders } : {} };
   if (args.apply && expect) {
     if (!finished) {
       result.apply = { applied: false, message: "The track is not complete yet. Continue it (continue_track_id) with the same `apply` to write it on the last chunk." };
@@ -48918,7 +49712,7 @@ async function trackMulti(ctx, args) {
   }
   return result;
 }
-var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, maxMissesFor, RegionDirection, VerifiedPoints, ScreenDirection, EXPECTED_ERROR_NOTE, LOWER_MODELS, round24, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, maxMissesFor, RegionDirection, VerifiedPoints, CORNER_NAMES, cornerName, PATH_CHECK_NOTE, EXPECTED_ERROR_NOTE, LOWER_MODELS, round25, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
@@ -48936,6 +49730,7 @@ var init_planar = __esm({
     init_frames();
     init_planar_math();
     init_png_utils();
+    init_path_check();
     init_region_track();
     init_screen_track();
     init_session();
@@ -49031,14 +49826,14 @@ var init_planar = __esm({
       }).optional().describe("Let the tool pick the points: Shi-Tomasi corners on the slightly blurred reference frame inside `region` minus `exclude`, spread out, each passing the tracker's contrast test. The chosen points are returned."),
       region: external_exports.object({
         area: RegionSchema.describe("The flat surface to follow, in comp pixels at ref_time: all of it (a sign, a wall, a painting, a phone or laptop screen with its bezel), not a few spots on it. A polygon [UL, UR, LR, LL] is also the quad written by ae_track_apply."),
-        exclude: external_exports.array(RegionSchema).max(8).optional().describe("Parts of the area that do not move with it: a reflection, a hole, something attached that moves on its own. People and objects crossing in front need no exclude.")
+        exclude: external_exports.array(RegionSchema).max(8).optional().describe("Parts of the area that are not the surface at ref_time: a person or object standing in front of it then, a reflection, a hole, something attached that moves on its own. Whatever is inside the area at ref_time becomes part of what is followed: on a sparsely marked green wall, a person in front at ref_time out-textured the marks and the track followed the person. People who come in front later need no exclude.")
       }).optional().describe(
         "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed. Refused on a flat area (a plain green screen): use points on its markers or corners."
       ),
       screen: external_exports.object({
         corners: external_exports.array(Point).length(4).describe("The screen's corners [UL, UR, LR, LL] in comp pixels at ref_time, where the key colour ends. A few pixels off is fine: they are snapped to the key edge first (the snapped ones come back).")
       }).optional().describe(
-        "Follow a keyable screen (a green or blue phone, laptop, monitor or board) by its outline: the key colour is read inside the corners at ref_time, and every frame each side's key edge is fitted as a line (sub-pixel; a hand crossing a side takes out only its own stretch) and the corners are where the lines meet. For a plain screen with nothing inside to track. Refused when the inside is not one saturated colour."
+        "Follow a keyable screen (a green or blue phone, laptop, monitor or board): the key colour is read inside the corners at ref_time and the corners are snapped to where it ends; then every frame the screen, its rim and the inside edge of its frame are aligned to the reference frame in their brightness and their key together (perspective; no edge is picked frame by frame, so the two parallel edges of a dark rim cannot make a corner flicker), and a hand or anything else in front of the key is found by its colour and left out of the fit with a margin, its edges with it. For a plain screen with nothing inside to track. Refused when the inside is not one saturated colour."
       ),
       continue_track_id: external_exports.string().min(1).max(80).optional().describe("Resume a track that returned `next`: the tool carries on from the stored state."),
       ref_time: external_exports.number().min(0).optional().describe("The reference frame in seconds, where `points` / `auto_points` apply. Default: the comp's current time if it is inside the range, else the middle of the work area."),
@@ -49053,6 +49848,9 @@ var init_planar = __esm({
       channel: external_exports.enum(["luma", "red", "green", "blue", "saturation"]).default("luma").describe("Which channel to track. Default luma."),
       quad: external_exports.array(Point).length(4).optional().describe("The surface's corners [UL, UR, LR, LL] in comp pixels at ref_time, drawn in the preview as it moves. Default: the bounding box of the points."),
       isolate_layers: external_exports.array(LayerSelectorSchema).min(1).max(100).optional().describe("Track only these layers (the plate): a temporary copy of the comp with every other layer off is rendered, so patches and overlays above the plate cannot corrupt the track. The copy is removed in the same call (two undo entries). Needs `expect`."),
+      holdout_layers: external_exports.array(LayerSelectorSchema).min(1).max(20).optional().describe(
+        "Region and screen tracks: layers that hold a matte of what passes in front of the surface (a solid with an animated mask drawn round a hand, a Roto Brush or key matte of a person). Their alpha (their brightness if they render opaque) is rendered every frame from a temporary copy of the comp showing only them, and the surface under it, with a few pixels round it, is left out of the fit. The plate is rendered without them (from isolate_layers, or every layer that is on but these). For what the automatic checks miss: something in front with the surface's own colours, or a corner whose sides are both hidden. Each frame is then two renders. Writes temporary comps: needs `expect`."
+      ),
       max_frames: external_exports.number().int().min(1).max(1e3).default(250).describe("Most frames (renders) in one call. Default 250. When it runs out the result has `next` and `continue_track_id`. After a panel restart a continued call first renders the reference frame again; that one render is not counted here and is reported as `budget.rebuild_renders`."),
       max_seconds: external_exports.number().min(5).max(300).default(90).describe("Most seconds of rendering in one call. Default 90. A continued call that had to rebuild its reference frame still tracks at least one frame, even if that rebuild used up this limit."),
       preview: external_exports.boolean().default(true).describe("Write a contact sheet of the first, reference and last frame of this call with point paths, pattern boxes and the surface quad. Default true."),
@@ -49060,8 +49858,8 @@ var init_planar = __esm({
       expect: ExpectSchema.optional().describe("Needed with isolate_layers or apply.")
     }).refine((v) => [v.points, v.auto_points, v.region, v.screen, v.continue_track_id].filter((x) => x !== void 0).length === 1, {
       message: "Give exactly one of points, auto_points, region, screen or continue_track_id."
-    }).refine((v) => v.isolate_layers === void 0 && v.apply === void 0 || v.expect !== void 0, {
-      message: "isolate_layers and apply write to the project, so `expect` is required."
+    }).refine((v) => v.isolate_layers === void 0 && v.apply === void 0 && v.holdout_layers === void 0 || v.expect !== void 0, {
+      message: "isolate_layers, holdout_layers and apply write to the project, so `expect` is required."
     });
     snapFrame = (t, fps) => Math.round(t * fps) / fps;
     MultiTracker = class {
@@ -49233,18 +50031,22 @@ var init_planar = __esm({
     };
     maxMissesFor = (fps) => Math.max(12, Math.round(2 * (fps > 0 ? fps : 25)));
     RegionDirection = class {
-      constructor(aligner, quad, scale, maxMisses) {
+      constructor(aligner, quad, scale, maxMisses, channels = (g) => g, detector = null) {
         this.quad = quad;
         this.scale = scale;
         this.maxMisses = maxMisses;
+        this.channels = channels;
         this.rt = new RegionTracker(
           aligner,
-          quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5])
+          quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5]),
+          detector,
+          Math.max(4, Math.round(6 * scale))
         );
       }
       quad;
       scale;
       maxMisses;
+      channels;
       rt;
       get lastH() {
         return imgToCompH(this.rt.Hprev, this.scale);
@@ -49255,8 +50057,8 @@ var init_planar = __esm({
       restore(last, prev) {
         this.rt.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
       }
-      step(gray, time) {
-        const r = this.rt.step(gray);
+      step(gray, time, rgba, matte) {
+        const r = this.rt.step(this.channels(gray, rgba), rgba, matte);
         if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
         const H = r.ok ? imgToCompH(r.H, this.scale) : null;
         const points = this.quad.map((p) => H ? applyH(H, p) : null);
@@ -49332,59 +50134,12 @@ var init_planar = __esm({
         return res;
       }
     };
-    ScreenDirection = class {
-      constructor(key, quad, scale, maxMisses) {
-        this.quad = quad;
-        this.scale = scale;
-        this.maxMisses = maxMisses;
-        this.st = new ScreenTracker(
-          key,
-          quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5]),
-          Math.max(6, Math.round(12 * scale))
-        );
-      }
-      quad;
-      scale;
-      maxMisses;
-      st;
-      get lastH() {
-        return imgToCompH(this.st.Hprev, this.scale);
-      }
-      get prevH() {
-        return imgToCompH(this.st.Hprev2, this.scale);
-      }
-      restore(last, prev) {
-        this.st.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
-      }
-      step(_gray, time, rgba) {
-        if (!rgba) throw new Error("the screen tracker needs the frame's colours");
-        const r = this.st.step(rgba);
-        if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
-        const H = r.ok ? imgToCompH(r.H, this.scale) : null;
-        const points = this.quad.map((p) => H ? applyH(H, p) : null);
-        const conf = r.ok && r.support !== null ? r4(Math.min(1, r.support)) : null;
-        return {
-          frame: {
-            time,
-            ok: r.ok,
-            H,
-            points,
-            confidence: points.map(() => conf),
-            rms_px: null,
-            expected_px: r.ok && r.expected_px !== null ? r4(r.expected_px / this.scale) : null,
-            inliers: r.ok ? 4 : 0,
-            coverage: r.coverage === null ? null : r4(r.coverage),
-            ...r.ok ? {} : { note: r.note ?? "the outline was not found" }
-          },
-          stop: null,
-          lost: [],
-          reacquired: []
-        };
-      }
-    };
+    CORNER_NAMES = ["UL", "UR", "LR", "LL"];
+    cornerName = (k, n) => n === 4 ? CORNER_NAMES[k] : `point ${k + 1}`;
+    PATH_CHECK_NOTE = "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the fit through its 3 neighbours each side (over jump_limit_px: a tick the eye sees), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
     EXPECTED_ERROR_NOTE = "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
     LOWER_MODELS = { perspective: ["affine", "similarity"], affine: ["similarity"], similarity: [], translate: [] };
-    round24 = (v) => [r4(v[0]), r4(v[1])];
+    round25 = (v) => [r4(v[0]), r4(v[1])];
     sampleIdx = (n) => Array.from(/* @__PURE__ */ new Set([0, Math.floor((n - 1) / 2), n - 1])).filter((i) => i >= 0 && i < n);
     near5 = (a, b, tol) => Math.abs(a - b) <= tol;
     MOTION_BLUR_NOTE = "Corner Pin and CC Power Pin animation gets no layer motion blur (AE blurs layer transforms only): use mode transform_pin, or add CC Force Motion Blur, if the shot needs it.";
@@ -49401,7 +50156,7 @@ var init_planar = __esm({
     planarTools = [
       {
         name: "ae_track_multi",
-        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front are pushed out of the fit, and it is the most accurate (0.1-0.35 px on real plates, through a person walking in front). Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
+        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front later are pushed out of the fit (exclude what is in front at ref_time), and it is the most accurate (0.1-0.9 px on real plates, through a person walking in front). For a keyable screen give `screen` {corners}. When something in front still pulls the fit, `holdout_layers` names layers with a matte of it (a solid with an animated mask, a Roto Brush matte): it is left out of every frame. Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. Once the track is finished its corners' paths are checked too, whatever made them (`path_check`): a frame where the surface's shape jumps against its neighbours, or leaves the path of the frames around it, is not written either, and `jump_preview_path` shows close-ups of the four corners round the worst ones. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
         schema: AeTrackMultiSchema,
         handler: async (args, ctx) => {
           try {
@@ -50044,8 +50799,8 @@ function lumaPercentiles(img, mask, threshold = 0.5, opts = {}) {
 }
 function madSigma(a) {
   if (a.length === 0) return 0;
-  const m = median5(a);
-  return 1.4826 * median5(a.map((v) => Math.abs(v - m)));
+  const m = median6(a);
+  return 1.4826 * median6(a.map((v) => Math.abs(v - m)));
 }
 function noiseSigma(gray, mask) {
   const { width: w, height: h, data } = gray;
@@ -50100,7 +50855,7 @@ function temporalLag1(a, b, mask) {
   }
   if (all.length < 50) return null;
   const sigma = madSigma(all) || 1;
-  const m = median5(all);
+  const m = median6(all);
   const ok = (k) => k < n && mask[k] >= 0.5 && Math.abs(d[k] - m) <= 4 * sigma;
   let num5 = 0;
   let den = 0;
@@ -50347,7 +51102,7 @@ function offsetPolygon(poly, d) {
   }
   return out;
 }
-var polygonArea, FAR, LUMA, LIN_LUT, EMPTY_STATS, median5;
+var polygonArea, FAR, LUMA, LIN_LUT, EMPTY_STATS, median6;
 var init_region_math = __esm({
   "src/tools/ext/region-math.ts"() {
     "use strict";
@@ -50372,7 +51127,7 @@ var init_region_math = __esm({
       clipped_low: 0,
       clipped_high: 0
     };
-    median5 = (a) => {
+    median6 = (a) => {
       if (a.length === 0) return 0;
       const s = Float64Array.from(a).sort();
       const m = s.length >> 1;
@@ -54405,12 +55160,12 @@ function medianSample(samples, size) {
   }
   return out;
 }
-function medianDistance(sample, median8, mask) {
+function medianDistance(sample, median9, mask) {
   let sum = 0;
   let n = 0;
   for (let i = 0; i < sample.length; i++) {
-    if (mask[i] < 0.5 || !Number.isFinite(sample[i]) || !Number.isFinite(median8[i])) continue;
-    sum += Math.abs(sample[i] - median8[i]);
+    if (mask[i] < 0.5 || !Number.isFinite(sample[i]) || !Number.isFinite(median9[i])) continue;
+    sum += Math.abs(sample[i] - median9[i]);
     n++;
   }
   return n >= 20 ? sum / n : null;
@@ -59154,10 +59909,10 @@ function grainFrame(inp) {
   return { ring, patch };
 }
 function medianSigma(rows) {
-  const spatial = [0, 1, 2].map((c) => r311(median6(rows.map((r) => r.spatial[c]))));
+  const spatial = [0, 1, 2].map((c) => r311(median7(rows.map((r) => r.spatial[c]))));
   const temps = rows.map((r) => r.temporal).filter((t) => t > 0);
   const lags = rows.map((r) => r.lag1).filter((v) => v !== null);
-  return { spatial, temporal: temps.length ? r311(median6(temps)) : 0, lag1: lags.length ? r311(median6(lags)) : null, frames: rows.length };
+  return { spatial, temporal: temps.length ? r311(median7(temps)) : 0, lag1: lags.length ? r311(median7(lags)) : null, frames: rows.length };
 }
 function grainMismatches(args, patchId, before, after, written) {
   const m = [];
@@ -59695,7 +60450,7 @@ async function finishHandler(args, ctx) {
     if (sig.length > 0 && Math.max(...sigLayer) > 0.15 / ls.scale) {
       const keyed = sig.length > 1 && spread >= 1;
       const times2 = keyed ? sig.map((x) => x.time) : [sig[0].time];
-      const values = keyed ? blurrinessAt.map(r311) : [r311(median6(blurrinessAt))];
+      const values = keyed ? blurrinessAt.map(r311) : [r311(median7(blurrinessAt))];
       plan2.blur = { times: times2, values, replace_existing: args.replace_existing };
       if (own && oldBlurriness !== null) {
         notes.push(`The earlier sit-in blur (Blurriness ${r311(oldBlurriness)}, sigma ${r311(oldSigma)} px at the reference frame) was in the composite when the patch was measured, so the amount written is the square root of its square plus the extra sigma measured at each time, and it replaces the earlier blur.`);
@@ -59736,7 +60491,7 @@ async function finishHandler(args, ctx) {
       report.motion_blur = { result: "No track given: the motion of the shot is unknown, so motion blur is not matched." };
     } else {
       const lens = prepSpeeds.map((v) => blurLengthPx(v, shutter));
-      const stats = { shutter_angle: shutter, max_px: r212(lens.length ? Math.max(...lens) : 0), p95_px: r212(percentile2(lens, 0.95)), median_px: r212(median6(lens)), frames: lens.length };
+      const stats = { shutter_angle: shutter, max_px: r212(lens.length ? Math.max(...lens) : 0), p95_px: r212(percentile2(lens, 0.95)), median_px: r212(median7(lens)), frames: lens.length };
       report.motion_blur = {
         ...stats,
         mover: info.layer.pinned ? "pin effect" : "layer transform",
@@ -59827,7 +60582,7 @@ async function finishHandler(args, ctx) {
   }
   return result;
 }
-var crypto19, fs53, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, ADD_GRAIN_CURVE, r212, r311, r48, errMessage11, yieldLoop6, clamp4, median6, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
+var crypto19, fs53, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, ADD_GRAIN_CURVE, r212, r311, r48, errMessage11, yieldLoop6, clamp4, median7, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
 var init_patchfit = __esm({
   "src/tools/ext/patchfit.ts"() {
     "use strict";
@@ -59874,7 +60629,7 @@ var init_patchfit = __esm({
     errMessage11 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop6 = () => new Promise((r) => setImmediate(r));
     clamp4 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    median6 = (a) => {
+    median7 = (a) => {
       if (a.length === 0) return 0;
       const s = Float64Array.from(a).sort();
       const m = s.length >> 1;
@@ -60504,18 +61259,18 @@ function buildInsertKeys(a) {
       continue;
     }
     times.push(f.time);
-    exact.ul.push(round25(ex[0]));
-    exact.ur.push(round25(ex[1]));
-    exact.lr.push(round25(ex[2]));
-    exact.ll.push(round25(ex[3]));
-    expanded.ul.push(round25(gx[0]));
-    expanded.ur.push(round25(gx[1]));
-    expanded.lr.push(round25(gx[2]));
-    expanded.ll.push(round25(gx[3]));
+    exact.ul.push(round26(ex[0]));
+    exact.ur.push(round26(ex[1]));
+    exact.lr.push(round26(ex[2]));
+    exact.ll.push(round26(ex[3]));
+    expanded.ul.push(round26(gx[0]));
+    expanded.ur.push(round26(gx[1]));
+    expanded.lr.push(round26(gx[2]));
+    expanded.ll.push(round26(gx[3]));
     if (dec) {
-      tr.position.push(round25(dec.position));
+      tr.position.push(round26(dec.position));
       tr.rotation.push(dec.rotation_deg);
-      tr.scale.push(round25(dec.scale_pct));
+      tr.scale.push(round26(dec.scale_pct));
     }
   }
   return {
@@ -60602,7 +61357,7 @@ function drawCornersPreview(frame, compSize, o) {
   drawPolygon(img, o.snapped.map(sc), 1, GREEN2);
   o.snapped.forEach((p, i) => {
     drawCross(img, p[0] * k, p[1] * k, 5, 1, GREEN2);
-    drawLabel(img, CORNER_NAMES[i], Math.round(p[0] * k) + 6, Math.round(p[1] * k) + 4, 1, [16, 16, 16, 255], GREEN2, 1);
+    drawLabel(img, CORNER_NAMES2[i], Math.round(p[0] * k) + 6, Math.round(p[1] * k) + 4, 1, [16, 16, 16, 255], GREEN2, 1);
   });
   for (const p of o.points) drawCross(img, p.x * k, p.y * k, 4, 1, CYAN);
   return img;
@@ -60830,7 +61585,7 @@ async function screenCorners(ctx, args) {
     if (c.shift_px / scale > args.search_px) notes2.push("The snapped corner is further than search_px from the guess.");
     return {
       index: i + 1,
-      name: CORNER_NAMES[i],
+      name: CORNER_NAMES2[i],
       guess: [r213(args.corners[i][0]), r213(args.corners[i][1])],
       snapped: [r213(snapped[i][0]), r213(snapped[i][1])],
       shift_px: r213(c.shift_px / scale),
@@ -61098,9 +61853,9 @@ async function measureLook(ctx, p) {
   }
   out.frames_measured = p02s.length;
   if (p02s.length > 0) {
-    out.black = median7(p02s);
-    out.white = median7(p98s);
-    out.p95 = median7(p95s);
+    out.black = median8(p02s);
+    out.white = median8(p98s);
+    out.p95 = median8(p95s);
   }
   if (p.needMeasure && p.insertItem && p.insertItem.kind === "comp" && p.insertGiven.black === void 0 && p.insertGiven.white === void 0 && !out.blocked) {
     const dur = p.insertItem.duration;
@@ -61124,7 +61879,7 @@ async function measureLook(ctx, p) {
         out.skipped.push(`insert at ${r213(at[i])} s: ${errMessage12(err)}`);
       }
     }
-    if (blacks.length > 0) out.insert = { black: median7(blacks), white: median7(whites), frames: blacks.length, source: "measured" };
+    if (blacks.length > 0) out.insert = { black: median8(blacks), white: median8(whites), frames: blacks.length, source: "measured" };
   }
   out.budget = { ...budget.used, max_renders: p.maxRenders, max_seconds: p.maxSeconds };
   return out;
@@ -61473,7 +62228,7 @@ async function screenReplace(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs54, path51, r213, r312, r49, clamp5, errMessage12, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES, median7, mean2, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round25, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
+var fs54, path51, r213, r312, r49, clamp5, errMessage12, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES2, median8, mean2, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round26, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
 var init_screenrep = __esm({
   "src/tools/ext/screenrep.ts"() {
     "use strict";
@@ -61507,8 +62262,8 @@ var init_screenrep = __esm({
     failure = (e) => ({ ok: false, error: e.code, message: e.message });
     snapFrame3 = (t, fps) => Math.round(t * fps) / fps;
     MAX_KEYS3 = 3e3;
-    CORNER_NAMES = ["UL", "UR", "LR", "LL"];
-    median7 = (a) => {
+    CORNER_NAMES2 = ["UL", "UR", "LR", "LL"];
+    median8 = (a) => {
       if (a.length === 0) return 0;
       const s = [...a].sort((x, y) => x - y);
       const m = s.length >> 1;
@@ -61535,7 +62290,7 @@ var init_screenrep = __esm({
       ["9:16", 9 / 16],
       ["9:21", 9 / 21]
     ];
-    round25 = (v) => [r49(v[0]), r49(v[1])];
+    round26 = (v) => [r49(v[0]), r49(v[1])];
     RED2 = [255, 60, 60, 255];
     GREEN2 = [80, 255, 120, 255];
     YELLOW = [255, 214, 0, 255];
@@ -66525,12 +67280,12 @@ function detectScreenColor(img, minCoverage = 0.1) {
   const blue = pick5(2);
   const best = green.coverage >= blue.coverage ? { ...green, kind: "green" } : { ...blue, kind: "blue" };
   if (best.coverage < minCoverage) return null;
-  const median8 = (v) => {
+  const median9 = (v) => {
     const s = [...v].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
   const round6 = (v) => Math.round(v * 1e3) / 1e3;
-  return { color: [round6(median8(best.rs)), round6(median8(best.gs)), round6(median8(best.bs))], kind: best.kind, coverage: round6(best.coverage) };
+  return { color: [round6(median9(best.rs)), round6(median9(best.gs)), round6(median9(best.bs))], kind: best.kind, coverage: round6(best.coverage) };
 }
 function measureKey(before, after, screen, edge = 3) {
   const { width: w, height: h } = before;

@@ -2158,7 +2158,7 @@ describe("ae_track_multi region, screen and the surface check", () => {
     expect(out.message).toMatch(/cannot be followed by its pixels.*points/);
   });
 
-  it("follows a green screen by its outline, with a hand across one side", async () => {
+  it("follows a green screen by the whole screen and its rim, with a hand across one side", async () => {
     const { ctx } = fakeAe({ frame: (k) => greenFrame(k, k >= 7) });
     const rough = SCREEN_Q.map((p, i) => [p[0] + (i % 2 ? 2 : -2), p[1] + (i < 2 ? -2 : 2)]);
     const at5 = rough.map((p) => applyH(motion(5), p as Vec2) as Vec2);
