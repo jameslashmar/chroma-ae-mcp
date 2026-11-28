@@ -303,6 +303,23 @@ describe("goodFeatures", () => {
   it("finds nothing in a flat image", () => {
     expect(goodFeatures({ width: W, height: H, data: new Float32Array(W * H).fill(90) }, null, { count: 4, minDistancePx: 10, patchSize: 11 })).toEqual([]);
   });
+  it("spreads the points over the area instead of crowding the busiest part", () => {
+    // A strong checkerboard in the top-left quarter, faint squares in the other three.
+    const d = new Float32Array(W * H).fill(60);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (x < 70 && y < 55) d[y * W + x] = ((Math.floor(x / 9) + Math.floor(y / 9)) % 2) * 200 + 20;
+        const sq = (cx: number, cy: number) => Math.abs(x - cx) < 8 && Math.abs(y - cy) < 8;
+        if (sq(120, 25) || sq(30, 95) || sq(125, 95)) d[y * W + x] = 95;
+      }
+    }
+    const im = { width: W, height: H, data: d };
+    const quarter = (p: { x: number; y: number }) => (p.x < 80 ? 0 : 1) + (p.y < 60 ? 0 : 2);
+    const greedy = goodFeatures(im, null, { count: 6, minDistancePx: 10, patchSize: 11 });
+    expect(new Set(greedy.map(quarter)).size).toBe(1);
+    const spread = goodFeatures(im, null, { count: 6, minDistancePx: 10, patchSize: 11, spread: true });
+    expect(new Set(spread.map(quarter)).size).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("expectedError", () => {

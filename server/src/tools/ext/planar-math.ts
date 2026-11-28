@@ -37,6 +37,13 @@ export interface PlanarFrame {
    */
   expected_px?: number | null;
   inliers: number;
+  /**
+   * The surface check (region-track.ts): normalized cross-correlation of the reference region with the
+   * frame over the pixels the fit kept, and the share of the visible region it kept. Region tracks and
+   * verified point tracks only.
+   */
+  ncc?: number | null;
+  coverage?: number | null;
   /** Why a frame is not ok, or a warning about it. */
   note?: string;
 }
@@ -50,6 +57,8 @@ export interface TrackingDirection {
   /** Last good comp-pixel position per point, to rebuild the tracker after a restart. */
   last_points: Array<Vec2 | null>;
   last_H: Mat3;
+  /** The good frame before last_H (a region track's speed), when known. */
+  prev_H?: Mat3;
 }
 
 export interface TrackingState {
@@ -825,7 +834,17 @@ export function transformShape(shape: ShapeData, P: Mat3): ShapeData & { maxErro
 export function goodFeatures(
   gray: GrayImage,
   mask: Float32Array | null,
-  opts: { count: number; minDistancePx: number; patchSize: number }
+  opts: {
+    count: number;
+    minDistancePx: number;
+    patchSize: number;
+    /**
+     * Spread the points over the area first: from the best corner of each cell of a grid (about two cells
+     * per point), always the one furthest from those taken. Without it the strongest corners win and crowd
+     * on the busiest part (8 points on a truck's lettering, none near its corners).
+     */
+    spread?: boolean;
+  }
 ): Array<{ x: number; y: number; score: number; std: number }> {
   const { width: w, height: h, data } = gray;
   const half = Math.floor(opts.patchSize / 2);
@@ -883,12 +902,57 @@ export function goodFeatures(
   }
   cands.sort((p, q) => q.score - p.score);
   const out: Array<{ x: number; y: number; score: number; std: number }> = [];
+  const take = (c: { x: number; y: number; score: number }) => {
+    if (out.length >= opts.count) return;
+    if (out.some((o) => Math.hypot(o.x - c.x, o.y - c.y) < opts.minDistancePx)) return;
+    const std = patchStd(gray, c.x, c.y, half);
+    if (std < 3) return;
+    out.push({ x: c.x, y: c.y, score: c.score, std });
+  };
+  if (opts.spread && cands.length > opts.count) {
+    let bx0 = Infinity;
+    let by0 = Infinity;
+    let bx1 = -Infinity;
+    let by1 = -Infinity;
+    for (const c of cands) {
+      bx0 = Math.min(bx0, c.x);
+      by0 = Math.min(by0, c.y);
+      bx1 = Math.max(bx1, c.x);
+      by1 = Math.max(by1, c.y);
+    }
+    const G = Math.max(2, Math.ceil(Math.sqrt(2 * opts.count)));
+    const cw = Math.max(1, (bx1 - bx0 + 1) / G);
+    const ch = Math.max(1, (by1 - by0 + 1) / G);
+    const firstOf = new Map<number, { x: number; y: number; score: number }>();
+    for (const c of cands) {
+      const k = Math.min(G - 1, Math.floor((c.y - by0) / ch)) * G + Math.min(G - 1, Math.floor((c.x - bx0) / cw));
+      if (!firstOf.has(k)) firstOf.set(k, c);
+    }
+    // From each cell's best corner, the strongest first, then always the one furthest from those taken
+    // (weighted a little by strength): the points reach the area's far parts before a second one goes near
+    // the first. take() still asks for the distance and a pattern with contrast.
+    const left = [...firstOf.values()].sort((p, q) => q.score - p.score);
+    if (left.length) take(left.shift()!);
+    while (out.length < opts.count && left.length) {
+      let bi = 0;
+      let bv = -1;
+      for (let i = 0; i < left.length; i++) {
+        const c = left[i];
+        let d = Infinity;
+        for (const o of out) d = Math.min(d, Math.hypot(o.x - c.x, o.y - c.y));
+        if (!out.length) d = 1;
+        const v = d * Math.pow(c.score / top, 0.25);
+        if (v > bv) {
+          bv = v;
+          bi = i;
+        }
+      }
+      take(left.splice(bi, 1)[0]);
+    }
+  }
   for (const c of cands) {
     if (out.length >= opts.count) break;
-    if (out.some((o) => Math.hypot(o.x - c.x, o.y - c.y) < opts.minDistancePx)) continue;
-    const std = patchStd(gray, c.x, c.y, half);
-    if (std < 3) continue;
-    out.push({ x: c.x, y: c.y, score: c.score, std });
+    take(c);
   }
   return out;
 }

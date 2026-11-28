@@ -20,6 +20,7 @@ import {
   layerSampleOf,
   loadTrack,
   MultiTracker,
+  VerifiedPoints,
   planarTools,
   platesFolderFor,
   regionLongerSide,
@@ -40,6 +41,7 @@ import {
 } from "../src/tools/ext/planar.js";
 import { applyH, identityH, invertH, mulH, type Mat3, type PlanarFrame, type PlanarTrack, type Vec2 } from "../src/tools/ext/planar-math.js";
 import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
+import { RegionAligner } from "../src/tools/ext/region-track.js";
 import { toGray } from "../src/tools/ext/track.js";
 import { FakeGroup, FakeLayer, FakeProject, FakeProperty, GUARD, loadHost, PropertyType, PropertyValueType, type FakeComp } from "./support/fake-ae.js";
 
@@ -706,6 +708,8 @@ const COPY_ID = 900;
 
 interface AeOpts {
   comp?: Record<string, unknown>;
+  /** The frame each render returns (default: the textured plane at frame k). */
+  frame?: (k: number) => PNG;
   failRenders?: boolean;
   failRendersOnCopy?: boolean;
   failEnd?: boolean;
@@ -758,7 +762,7 @@ function fakeAe(opts: AeOpts = {}) {
         if (opts.failRenders || (opts.failRendersOnCopy && args.comp_id === COPY_ID)) throw new Error("render failed");
         const k = Math.round(args.time * 10);
         fs.mkdirSync(path.dirname(args.output_path), { recursive: true });
-        fs.writeFileSync(args.output_path, PNG.sync.write(frameAtK(k)));
+        fs.writeFileSync(args.output_path, PNG.sync.write((opts.frame ?? frameAtK)(k)));
         return ok({ path: args.output_path, time: args.time });
       }
       if (fn === "planarIsolateBegin") return ok({ copy_id: COPY_ID, copy_name: "_chroma_plate_Main", original_id: 1 });
@@ -2020,3 +2024,147 @@ describe("lens distortion seen through a track", () => {
     expect(lensCheck(t)).toBeNull();
   });
 });
+
+// ---------- region and screen tracks, and the surface check on points ----------
+
+/** Mean distance of a quad's corners under two motions, px. */
+const quadErr = (a: Mat3, b: Mat3, q: Vec2[]) => q.reduce((t, c) => t + Math.hypot((applyH(a, c) as Vec2)[0] - (applyH(b, c) as Vec2)[0], (applyH(a, c) as Vec2)[1] - (applyH(b, c) as Vec2)[1]), 0) / q.length;
+
+/** A green screen in a dark bezel on the moving plane (comp px), 4x supersampled. */
+const SCREEN_Q: Vec2[] = [[70, 45], [170, 45], [170, 115], [70, 115]];
+function greenFrame(k: number, hand = false): PNG {
+  const inv = invertH(motion(k))!;
+  const png = new PNG({ width: W, height: H });
+  const inQ = (q: Vec2[], p: Vec2) => p[0] >= q[0][0] && p[0] < q[1][0] && p[1] >= q[0][1] && p[1] < q[2][1];
+  const bezel: Vec2[] = [[60, 35], [180, 35], [180, 125], [60, 125]];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let sy = 0; sy < 4; sy++) {
+        for (let sx = 0; sx < 4; sx++) {
+          const px = x + 0.125 + sx * 0.25;
+          const py = y + 0.125 + sy * 0.25;
+          const p = applyH(inv, [px, py]) as Vec2;
+          let c = inQ(SCREEN_Q, p) ? [50, 175, 55] : inQ(bezel, p) ? [25, 25, 28] : [140 + 30 * Math.sin(px * 0.2), 135, 120];
+          if (hand && px > 150 && px < 200 && py > 60 && py < 95) c = [210, 160, 130];
+          r += c[0];
+          g += c[1];
+          b += c[2];
+        }
+      }
+      const i = (y * W + x) * 4;
+      png.data[i] = Math.round(r / 16);
+      png.data[i + 1] = Math.round(g / 16);
+      png.data[i + 2] = Math.round(b / 16);
+      png.data[i + 3] = 255;
+    }
+  }
+  return png;
+}
+
+describe("ae_track_multi region, screen and the surface check", () => {
+  it("follows a region by its pixels, in perspective, and every frame is checked", async () => {
+    const { ctx } = fakeAe();
+    const args = AeTrackMultiSchema.parse({ comp_id: 1, region: { area: { polygon: QUAD } }, preview: false });
+    const out = (await tool("ae_track_multi").handler(args, ctx)) as Out;
+    expect(out.ok).toBe(true);
+    expect(out.complete).toBe(true);
+    expect(out.model).toBe("perspective");
+    expect(out.frames_ok).toBe(10);
+    expect(out.surface_check.frames_failed).toBe(0);
+    expect(out.surface_check.ncc_min_ok).toBeGreaterThan(0.95);
+    // The quad's corners are the points; the motion is the plane's.
+    expect(out.points).toHaveLength(4);
+    const track = loadTrack(out.track_id)!;
+    for (const fr of track.frames) {
+      const k = Math.round(fr.time * 10);
+      const truth = mulH(motion(k), invertH(motion(5))!);
+      expect(quadErr(fr.H!, truth, QUAD)).toBeLessThan(0.1);
+    }
+    expect(out.notes.join(" ")).toMatch(/one flat surface/);
+  });
+
+  it("refuses a flat region with a way out", async () => {
+    const { ctx } = fakeAe({ frame: () => { const p = new PNG({ width: W, height: H }); p.data.fill(120); return p; } });
+    const args = AeTrackMultiSchema.parse({ comp_id: 1, region: { area: { polygon: QUAD } }, preview: false });
+    const out = (await tool("ae_track_multi").handler(args, ctx)) as Out;
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/cannot be followed by its pixels.*points/);
+  });
+
+  it("follows a green screen by its outline, with a hand across one side", async () => {
+    const { ctx } = fakeAe({ frame: (k) => greenFrame(k, k >= 7) });
+    const rough = SCREEN_Q.map((p, i) => [p[0] + (i % 2 ? 2 : -2), p[1] + (i < 2 ? -2 : 2)]);
+    const at5 = rough.map((p) => applyH(motion(5), p as Vec2) as Vec2);
+    const args = AeTrackMultiSchema.parse({ comp_id: 1, screen: { corners: at5 }, preview: false });
+    const out = (await tool("ae_track_multi").handler(args, ctx)) as Out;
+    expect(out.ok).toBe(true);
+    expect(out.frames_ok).toBe(10);
+    const truthAt5 = SCREEN_Q.map((p) => applyH(motion(5), p) as Vec2);
+    // The rough corners were snapped to the screen's edge.
+    out.points.forEach((p: any, i: number) => expect(Math.hypot(p.x - truthAt5[i][0], p.y - truthAt5[i][1])).toBeLessThan(0.3));
+    const track = loadTrack(out.track_id)!;
+    for (const fr of track.frames) {
+      const k = Math.round(fr.time * 10);
+      const truth = mulH(motion(k), invertH(motion(5))!);
+      expect(quadErr(fr.H!, truth, truthAt5)).toBeLessThan(0.3);
+    }
+  });
+
+  it("refuses a screen whose inside is not one colour", async () => {
+    const { ctx } = fakeAe();
+    const args = AeTrackMultiSchema.parse({ comp_id: 1, screen: { corners: QUAD }, preview: false });
+    const out = (await tool("ae_track_multi").handler(args, ctx)) as Out;
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/not one saturated colour/);
+  });
+
+  it("never keys a frame that shows something else where the surface was", async () => {
+    const { ctx } = fakeAe({ frame: (k) => (k >= 7 ? frameAtKOther(k) : frameAtK(k)) });
+    const out = (await tool("ae_track_multi").handler(multi({ quad: QUAD, model: "perspective" }), ctx)) as Out;
+    expect(out.ok).toBe(true);
+    const track = loadTrack(out.track_id)!;
+    expect(track.frames.filter((fr) => fr.time >= 0.65).every((fr) => !fr.ok)).toBe(true);
+    expect(track.frames.filter((fr) => fr.time < 0.65 && fr.time > 0.05 && Math.abs(fr.time - 0.5) > 0.01).every((fr) => fr.ok && typeof fr.ncc === "number")).toBe(true);
+    expect(out.surface_check.frames_checked).toBeGreaterThan(0);
+  });
+
+  it("checks each solved points frame against the surface, and holds the last good motion when one fails", () => {
+    const ref = grayOf(5);
+    const mask = regionMask(W, H, 1, { polygon: QUAD }, [], 0);
+    const aligner = new RegionAligner(ref, mask);
+    // A stand-in point tracker that solves frame 6 right and the next ones 30 px off.
+    const right = mulH(motion(6), invertH(motion(5))!);
+    const wrong = mulH([1, 0, 30, 0, 1, 0, 0, 0, 1], right);
+    const fake: any = {
+      lastH: identityH(),
+      calls: 0,
+      step(_g: unknown, time: number) {
+        this.calls++;
+        const H = this.calls === 1 ? right : wrong;
+        this.lastH = H;
+        return { frame: { time, ok: true, H, points: [], confidence: [], rms_px: 0.1, inliers: 5 }, stop: null, lost: [], reacquired: [] };
+      },
+    };
+    const v = new VerifiedPoints(fake, aligner, 1, true, 3);
+    const a = v.step(grayOf(6), 0.6);
+    expect(a.frame!.ok).toBe(true);
+    expect(a.frame!.ncc).toBeGreaterThan(0.95);
+    const b = v.step(grayOf(6), 0.7);
+    expect(b.frame!.ok).toBe(false);
+    expect(b.frame!.H).toBeNull();
+    expect(b.frame!.note).toMatch(/^unverified/);
+    // The tracker's motion is put back to the last good frame's.
+    expect(quadErr(v.lastH, right, QUAD)).toBeLessThan(0.2);
+    // Three in a row stop the direction.
+    v.step(grayOf(6), 0.8);
+    expect(v.step(grayOf(6), 0.9).stop).toBe("lost");
+  });
+});
+
+/** Frame k drawn with other content than the plane (as when a person fills the surface). */
+function frameAtKOther(k: number): PNG {
+  return frameAtK(k, { other: true });
+}

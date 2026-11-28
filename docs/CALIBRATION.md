@@ -156,3 +156,22 @@ Emre's Windows PC. The plate is a textured photograph of a rock surface (a scann
 - **Clone offset:** the hole is 0.56-1.37 levels from the truth; a shift-only clone would be 5.4-6.0 px off.
 - **Lens:** straight 0.052 to 0.052 px; field of view 40: k -0.074, corner 40.5 px, 0.232 to 0.045 px; field of view 80: k -0.268, corner 147.8 px, 0.754 to 0.378 px. Verdicts as on macOS.
 - **Inpaint:** static temporal 0.00 levels (99 dB), moving temporal 0.40 (50.1 dB), spatial only 3.48 (34.3 dB).
+
+## Planar tracking on real footage (AE 27.0x78, Windows, 2026-11-27)
+
+Four free Hollywood Camera Work VFX plates (1280 x 1080 DVCPRO HD, interpreted with square pixels; their licence allows using and publishing results but not hosting the clips, so they are not in the repository and a re-run needs a local copy). The reference corners were solved independently of the MCP with OpenCV, each frame straight against the reference frame: SIFT matches on the U-Haul truck and the licence plate, the keyed green screen's edge lines on the laptop, the six blue markers on the painting board. Errors are the mean corner distance of the surface quad over the frames the track calls ok; "wrong but ok" counts frames off by 10 px or more that were not flagged.
+
+| Plate (frames) | What makes it hard | Before (8 auto points, perspective) | `region` | `screen` | points with the surface check |
+|---|---|---|---|---|---|
+| U-Haul truck (189) | A person walks in front of half the truck | <1 px until frame 88, then hundreds of px off while ok | 189/189 ok, median 0.12, max 0.35 px | | 104 ok (max 0.18 px), the rest flagged, stopped as lost; none wrong but ok |
+| Licence plate (145, 101 with reference corners) | The plate starts tiny | median 0.35 px | 92 ok, median 0.15 px; frames 0-8 (tiny plate) flagged | | 90 ok, median 0.15 px |
+| Laptop green screen (219) | Flat screen, a hand crosses it | lost at frame 25, points drifting from 16 | good to frame 84, then flagged (hand) | 219/219 ok, median 0.20, max 0.47 px | |
+| Green board with 6 markers (228) | Flat board, arm and towel cross it | median 207 px | 109 ok, max 1.36 px; the rest flagged | 165 ok, forward under 1 px | |
+
+- **The surface check** (region-track.ts): each frame aligned to the reference frame's region, then the correlation over the pixels the fit kept (ncc 0.85 or more over 20% or more of the visible region) and a 6 x 6 grid of cells: at least 35% of the textured cells must agree, and the agreeing ones alone must hold the region's corners within 2 px (or twice the whole fit). Right frames had 50-100% agreeing and 0.16-1.2 px; frames 6-230 px off had under 30%, or a band along one edge of a flat board pinning the far corners only to 3.4-38 px. One correlation alone kept 0.99 on the board while 100 px off.
+- **`expected_error_px` of a region track** (the fit's covariance times 12): true / expected had a median of 0.98 on the truck and 0.86 on the plate (textured), 2.4 on the board and 2.0 on the laptop (mostly flat).
+- **The screen tracker's edge** is where the key colour's strength (the colour projected on the key's own direction away from grey) changes fastest, which is linear in how much of a pixel is screen; the soft key it replaced pulled edges up to half a pixel inwards (0.04-0.21 px against 0.3-0.58 on a synthetic screen with a hand across a side). A dark rim between the bright screen and the bezel (a laptop's lip shadow) is outside that edge: `expansion_pct` covers it.
+- **`ae_screen_corners`** on the laptop against the keyed reference: `auto` (the key edge) 0.49-0.61 px; `inner` 1.4-3.2 px; `outer` 11-18 px (the bezel's outer edge).
+- **On the board's corners** in the frames where the camera is close, the reference corners (extrapolated from the markers in the middle) were up to 25 px off while the screen track sat on the board's corners (checked in 8x crops), so the screen row's backward frames are not scored against them.
+- **CC Power Pin**: with the GT motion written by `ae_screen_replace`, the rendered insert was within 0.99 px of the corners on all 37 sampled frames (a constant 1 px inward bias of the render), and Expansion 2 landed within 0.85 px of expandQuad's corners.
+- **Speed**: 120-200 ms of Node per frame for a region or screen track (1280 x 1080), on top of AE's render.

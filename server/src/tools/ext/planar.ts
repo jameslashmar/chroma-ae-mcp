@@ -6,9 +6,11 @@
  * After Effects (no outside tools): AE renders the frames (saveFrameToPng,
  * as the frame tools do), the server follows the points by normalized cross-
  * correlation (track.ts) and solves a motion model per frame (planar-math.ts).
- * - ae_track_multi: 1-8 points, forwards and backwards from a reference frame,
- *   translate / similarity / affine / perspective, lost points re-acquired,
- *   long shots followed in chunks that resume exactly
+ * - ae_track_multi: forwards and backwards from a reference frame, by a region's
+ *   pixels (region-track.ts), a green or blue screen's key outline
+ *   (screen-track.ts), or 1-8 points (translate / similarity / affine /
+ *   perspective, lost points re-acquired); every frame checked against the
+ *   surface; long shots followed in chunks that resume exactly
  * - ae_track_read: a track that already exists in the project (nulls, Corner
  *   Pin / CC Power Pin keys from Mocha or AE, AE Tracker points, transform
  *   keys) into the same track format. Read only.
@@ -89,6 +91,8 @@ import {
   type Vec2,
 } from "./planar-math.js";
 import { blit, createCanvas, drawCross, drawLabel, drawPolygon, encodePng, fitWithin, resizeArea, strokeRect, type RgbaImage } from "./png-utils.js";
+import { compToImgH, imgToCompH, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
+import { fitScreenQuad, keyStrength, sampleKey, ScreenTracker, type ScreenKey } from "./screen-track.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
 import { boxBlurGray, makeWarpedTemplate, PointTracker, toGray, trackTimes, type GrayImage, type Template } from "./track.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
@@ -335,6 +339,23 @@ export const AeTrackMultiSchema = z
       })
       .optional()
       .describe("Let the tool pick the points: Shi-Tomasi corners on the slightly blurred reference frame inside `region` minus `exclude`, spread out, each passing the tracker's contrast test. The chosen points are returned."),
+    region: z
+      .object({
+        area: RegionSchema.describe("The flat surface to follow, in comp pixels at ref_time: all of it (a sign, a wall, a painting, a phone or laptop screen with its bezel), not a few spots on it. A polygon [UL, UR, LR, LL] is also the quad written by ae_track_apply."),
+        exclude: z.array(RegionSchema).max(8).optional().describe("Parts of the area that do not move with it: a reflection, a hole, something attached that moves on its own. People and objects crossing in front need no exclude."),
+      })
+      .optional()
+      .describe(
+        "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed. Refused on a flat area (a plain green screen): use points on its markers or corners."
+      ),
+    screen: z
+      .object({
+        corners: z.array(Point).length(4).describe("The screen's corners [UL, UR, LR, LL] in comp pixels at ref_time, where the key colour ends. A few pixels off is fine: they are snapped to the key edge first (the snapped ones come back)."),
+      })
+      .optional()
+      .describe(
+        "Follow a keyable screen (a green or blue phone, laptop, monitor or board) by its outline: the key colour is read inside the corners at ref_time, and every frame each side's key edge is fitted as a line (sub-pixel; a hand crossing a side takes out only its own stretch) and the corners are where the lines meet. For a plain screen with nothing inside to track. Refused when the inside is not one saturated colour."
+      ),
     continue_track_id: z.string().min(1).max(80).optional().describe("Resume a track that returned `next`: the tool carries on from the stored state."),
     ref_time: z.number().min(0).optional().describe("The reference frame in seconds, where `points` / `auto_points` apply. Default: the comp's current time if it is inside the range, else the middle of the work area."),
     start: z.number().min(0).optional().describe("First time to track back to. Default: the work area start."),
@@ -359,8 +380,8 @@ export const AeTrackMultiSchema = z
     apply: ApplyTargetSchema.optional().describe("Write the finished track like ae_track_apply, once the last chunk is done. Needs `expect`."),
     expect: ExpectSchema.optional().describe("Needed with isolate_layers or apply."),
   })
-  .refine((v) => [v.points, v.auto_points, v.continue_track_id].filter((x) => x !== undefined).length === 1, {
-    message: "Give exactly one of points, auto_points or continue_track_id.",
+  .refine((v) => [v.points, v.auto_points, v.region, v.screen, v.continue_track_id].filter((x) => x !== undefined).length === 1, {
+    message: "Give exactly one of points, auto_points, region, screen or continue_track_id.",
   })
   .refine((v) => (v.isolate_layers === undefined && v.apply === undefined) || v.expect !== undefined, {
     message: "isolate_layers and apply write to the project, so `expect` is required.",
@@ -777,6 +798,7 @@ export class MultiTracker {
   private readonly imgRef: Vec2[];
   private readonly patchImg: number;
   lastH: Mat3 = identityH();
+  readonly prevH: Mat3 | null = null;
   /** Per point: was it found on the previous frame? A cut is judged on these only. */
   private readonly prevFound: boolean[] = [];
 
@@ -948,6 +970,245 @@ export class MultiTracker {
   }
 }
 
+// ---------- one direction of a track, by points or by region ----------
+
+/** What ae_track_multi steps through a chunk: a point tracker or a region tracker, in comp px. */
+export interface DirectionTracker {
+  /** `rgba` is the frame as rendered (the screen tracker keys its colour). */
+  step(gray: GrayImage, time: number, rgba?: RgbaImage): StepResult;
+  /** The last good motion, comp px. */
+  readonly lastH: Mat3;
+  /** The good motion before it, when the tracker keeps one (a region track's speed). */
+  readonly prevH: Mat3 | null;
+}
+
+/** Unverified (or unaligned) frames in a row after which a direction stops as lost: two seconds, at least 12 frames. */
+export const maxMissesFor = (fps: number): number => Math.max(12, Math.round(2 * (fps > 0 ? fps : 25)));
+
+/**
+ * A region track as a direction: RegionTracker in image px, frames in comp px. The quad's corners are the
+ * track's points (what the nulls mode writes); confidence is the frame's correlation.
+ */
+export class RegionDirection implements DirectionTracker {
+  private readonly rt: RegionTracker;
+
+  constructor(
+    aligner: RegionAligner,
+    private readonly quad: Vec2[],
+    private readonly scale: number,
+    private readonly maxMisses: number
+  ) {
+    this.rt = new RegionTracker(
+      aligner,
+      quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2)
+    );
+  }
+
+  get lastH(): Mat3 {
+    return imgToCompH(this.rt.Hprev, this.scale);
+  }
+
+  get prevH(): Mat3 | null {
+    return imgToCompH(this.rt.Hprev2, this.scale);
+  }
+
+  restore(last: Mat3, prev: Mat3 | null): void {
+    this.rt.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
+  }
+
+  step(gray: GrayImage, time: number): StepResult {
+    const r = this.rt.step(gray);
+    if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
+    const H = r.ok ? imgToCompH(r.H, this.scale) : null;
+    const points = this.quad.map((p) => (H ? applyH(H, p) : null));
+    const conf = r.ok && r.ncc !== null ? r4(r.ncc) : null;
+    return {
+      frame: {
+        time,
+        ok: r.ok,
+        H,
+        points,
+        confidence: points.map(() => conf),
+        rms_px: null,
+        expected_px: r.ok && r.expected_px !== null ? r4(r.expected_px / this.scale) : null,
+        inliers: r.ok ? this.quad.length : 0,
+        ncc: r.ncc === null ? null : r4(r.ncc),
+        coverage: r.coverage === null ? null : r4(r.coverage),
+        ...(r.ok ? {} : { note: r.note ?? "the region could not be aligned" }),
+      },
+      stop: null,
+      lost: [],
+      reacquired: [],
+    };
+  }
+}
+
+/**
+ * The point tracker with every solved frame checked against the surface (`aligner`'s area): the frame's
+ * motion is the start of a short region alignment (from the second pyramid level), and a frame that does
+ * not line up is reported (ok false, a note) instead of being written: the points can all agree on a wrong
+ * place (a person walking through a truck's lettering took 6 of 8 points with her). With a perspective
+ * model the aligned motion replaces the points' one, which is closer (0.15 px against 0.35 on a licence
+ * plate); with fewer parameters the points' motion stays and the check is only a check.
+ */
+export class VerifiedPoints implements DirectionTracker {
+  private prior: Float32Array[] | null = null;
+  misses = 0;
+  readonly prevH = null;
+
+  constructor(
+    readonly mt: MultiTracker,
+    private readonly aligner: RegionAligner,
+    private readonly scale: number,
+    private readonly refine: boolean,
+    private readonly maxMisses: number
+  ) {}
+
+  get lastH(): Mat3 {
+    return this.mt.lastH;
+  }
+
+  step(gray: GrayImage, time: number): StepResult {
+    const before = this.mt.lastH;
+    const res = this.mt.step(gray, time);
+    const f = res.frame;
+    if (res.stop || !f || !f.ok || !f.H) return res;
+    const pyr = pyramid(gray, this.aligner.levels.length);
+    const a = this.aligner.align(pyr, compToImgH(f.H, this.scale), this.prior, Math.min(1, this.aligner.levels.length - 1));
+    if ("failed" in a || !verdict(a)) {
+      this.mt.lastH = before;
+      f.ok = false;
+      f.H = null;
+      f.note = `unverified: ${"failed" in a ? a.failed : verdictWhy(a)}`;
+      if (!("failed" in a)) {
+        f.ncc = r4(a.ncc);
+        f.coverage = r4(a.coverage);
+      }
+      this.misses++;
+      if (this.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: res.lost, reacquired: res.reacquired };
+      return res;
+    }
+    this.misses = 0;
+    this.prior = a.weights;
+    f.ncc = r4(a.ncc);
+    f.coverage = r4(a.coverage);
+    if (this.refine) {
+      const Hr = imgToCompH(a.H, this.scale);
+      f.H = Hr;
+      this.mt.lastH = Hr;
+    }
+    return res;
+  }
+}
+
+/** A screen track as a direction: ScreenTracker in image px, frames in comp px; the screen's corners are the points. */
+export class ScreenDirection implements DirectionTracker {
+  private readonly st: ScreenTracker;
+
+  constructor(
+    key: ScreenKey,
+    private readonly quad: Vec2[],
+    private readonly scale: number,
+    private readonly maxMisses: number
+  ) {
+    this.st = new ScreenTracker(
+      key,
+      quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2),
+      Math.max(6, Math.round(12 * scale))
+    );
+  }
+
+  get lastH(): Mat3 {
+    return imgToCompH(this.st.Hprev, this.scale);
+  }
+
+  get prevH(): Mat3 | null {
+    return imgToCompH(this.st.Hprev2, this.scale);
+  }
+
+  restore(last: Mat3, prev: Mat3 | null): void {
+    this.st.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
+  }
+
+  step(_gray: GrayImage, time: number, rgba?: RgbaImage): StepResult {
+    if (!rgba) throw new Error("the screen tracker needs the frame's colours");
+    const r = this.st.step(rgba);
+    if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
+    const H = r.ok ? imgToCompH(r.H, this.scale) : null;
+    const points = this.quad.map((p) => (H ? applyH(H, p) : null));
+    const conf = r.ok && r.support !== null ? r4(Math.min(1, r.support)) : null;
+    return {
+      frame: {
+        time,
+        ok: r.ok,
+        H,
+        points,
+        confidence: points.map(() => conf),
+        rms_px: null,
+        expected_px: r.ok && r.expected_px !== null ? r4(r.expected_px / this.scale) : null,
+        inliers: r.ok ? 4 : 0,
+        coverage: r.coverage === null ? null : r4(r.coverage),
+        ...(r.ok ? {} : { note: r.note ?? "the outline was not found" }),
+      },
+      stop: null,
+      lost: [],
+      reacquired: [],
+    };
+  }
+}
+
+/** The quad a region stands for: a 4-corner polygon as given when it is a proper quad, else its bounding rectangle. */
+export function quadOfRegion(r: Region): Vec2[] {
+  if ("polygon" in r && r.polygon.length === 4) {
+    const q = r.polygon.map((p) => [p[0], p[1]] as Vec2);
+    if (quadCheck(q).ok) return q;
+  }
+  if ("rect" in r) return rectQuad(r.rect[2], r.rect[3], r.rect[0], r.rect[1]);
+  if ("ellipse" in r) return rectQuad(2 * r.ellipse[2], 2 * r.ellipse[3], r.ellipse[0] - r.ellipse[2], r.ellipse[1] - r.ellipse[3]);
+  const xs = r.polygon.map((p) => p[0]);
+  const ys = r.polygon.map((p) => p[1]);
+  return rectQuad(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), Math.min(...xs), Math.min(...ys));
+}
+
+/** The convex hull of points (Andrew's monotone chain), counter-clockwise in screen coordinates. */
+function convexHull(points: Vec2[]): Vec2[] {
+  const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o: Vec2, a: Vec2, b: Vec2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: Vec2[] = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper: Vec2[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
+/**
+ * Where a points track is checked: the surface quad when one was given, else the auto_points region, else
+ * the points' hull grown by half a pattern. Null for fewer than 3 points with neither (nothing to check).
+ */
+export function verifyAreaFor(a: { quad?: Vec2[]; autoRegion?: Region; points: Vec2[]; patternSize: number }): Region | null {
+  if (a.quad) return { polygon: a.quad.map((p) => [p[0], p[1]]) };
+  if (a.autoRegion) return a.autoRegion;
+  if (a.points.length < 3) return null;
+  const hull = convexHull(a.points);
+  if (hull.length < 3) return null;
+  const c: Vec2 = [hull.reduce((t, p) => t + p[0], 0) / hull.length, hull.reduce((t, p) => t + p[1], 0) / hull.length];
+  const grow = a.patternSize / 2;
+  return {
+    polygon: hull.map((p) => {
+      const d = Math.hypot(p[0] - c[0], p[1] - c[1]) || 1;
+      return [p[0] + ((p[0] - c[0]) / d) * grow, p[1] + ((p[1] - c[1]) / d) * grow];
+    }),
+  };
+}
+
 // ---------- regions, channels ----------
 
 function inRegion(r: Region, x: number, y: number, grow: number): boolean {
@@ -1003,6 +1264,29 @@ export function regionMask(width: number, height: number, scale: number, region:
     }
   }
   return mask;
+}
+
+/** The mask shrunk by `r` px: 1 only where the whole (2r + 1) square around the pixel is 1. */
+export function erodeMask(mask: Float32Array, width: number, height: number, r: number): Float32Array {
+  if (!(r > 0)) return mask;
+  const W1 = width + 1;
+  const sum = new Float64Array(W1 * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let row = 0;
+    for (let x = 0; x < width; x++) {
+      row += mask[y * width + x] > 0 ? 1 : 0;
+      sum[(y + 1) * W1 + x + 1] = sum[y * W1 + x + 1] + row;
+    }
+  }
+  const out = new Float32Array(width * height);
+  const full = (2 * r + 1) ** 2;
+  for (let y = r; y < height - r; y++) {
+    for (let x = r; x < width - r; x++) {
+      const s = sum[(y + r + 1) * W1 + x + r + 1] - sum[(y - r) * W1 + x + r + 1] - sum[(y + r + 1) * W1 + x - r] + sum[(y - r) * W1 + x - r];
+      if (s >= full) out[y * width + x] = 1;
+    }
+  }
+  return out;
 }
 
 export type Channel = "luma" | "red" | "green" | "blue" | "saturation";
@@ -1343,6 +1627,26 @@ export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string
     ...slidingSummary(track),
     ...lensSummary(track),
     frames_lost_per_point: lostPer,
+    ...(() => {
+      // Frames that are not ok, with why: the apply tools skip them and interpolate across.
+      const notOk = track.frames.filter((f) => !f.ok);
+      const checked = track.frames.filter((f) => typeof f.ncc === "number" && f.time !== track.ref_time);
+      const okChecked = checked.filter((f) => f.ok);
+      return {
+        ...(notOk.length ? { frames_not_ok: { count: notOk.length, first: notOk.slice(0, 12).map((f) => ({ time: r4(f.time), note: f.note ?? null })) } } : {}),
+        ...(checked.length
+          ? {
+              surface_check: {
+                frames_checked: checked.length,
+                frames_failed: checked.length - okChecked.length,
+                ncc_min_ok: okChecked.length ? r4(Math.min(...okChecked.map((f) => f.ncc as number))) : null,
+                coverage_min_ok: okChecked.length ? r4(Math.min(...okChecked.map((f) => (typeof f.coverage === "number" ? f.coverage : 1)))) : null,
+                note: "Each frame was aligned to the reference frame's surface: ncc is the correlation over the pixels that line up, coverage the share of the visible surface that does (lower while something crosses in front). A frame that does not line up is not ok and is not written.",
+              },
+            }
+          : {}),
+      };
+    })(),
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r2(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
     ...(step > 1 ? { frame_rows_sampled_every: step } : {}),
@@ -1836,11 +2140,18 @@ interface TrackOptionsStored {
   pre_blur: number;
   channel: Channel;
   isolate_layers?: LayerSelector[];
+  /** points (the default, older tracks have none), region or screen. */
+  method?: "points" | "region" | "screen";
+  /** screen: the key read at ref_time. */
+  screen_key?: ScreenKey;
+  /** region: the area followed; points: where frames are checked (null: not checked). */
+  area?: Region | null;
+  exclude?: Region[];
 }
 
 interface LiveTrack {
-  forward: MultiTracker | null;
-  backward: MultiTracker | null;
+  forward: DirectionTracker | null;
+  backward: DirectionTracker | null;
 }
 
 /** Trackers kept between calls so a continued chunk matches a single long call exactly. A cache only: the track file has everything to rebuild them. */
@@ -1936,7 +2247,14 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           pre_blur: args.pre_blur ?? 0,
           channel: args.channel,
           ...(args.isolate_layers ? { isolate_layers: args.isolate_layers } : {}),
+          method: args.region ? "region" : args.screen ? "screen" : "points",
+          ...(args.region ? { area: args.region.area, exclude: args.region.exclude ?? [] } : { exclude: args.auto_points?.exclude ?? [] }),
         };
+    if (!stored && (o.method === "region" || o.method === "screen")) {
+      if (args.model && args.model !== "perspective") notes.push(`A ${o.method} track is solved in perspective; model "${args.model}" was not used. Write it with ae_track_apply refit_model: "${args.model}" for fewer parameters.`);
+      o.model = "perspective";
+    }
+    const maxMisses = maxMissesFor(fps);
     const prep = (png: RgbaImage): GrayImage => boxBlurGray(channelGray(png, o.channel), o.pre_blur);
 
     // The guard, checkpoint and session record come before the temporary comp exists.
@@ -1987,8 +2305,19 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       }
       if (stored) {
         refPoints = stored.ref_points;
-        if (cached?.forward) scale = cached.forward.scale;
-        else if (cached?.backward) scale = cached.backward.scale;
+        if (cached) scale = (cached as LiveTrack & { scale?: number }).scale ?? scale;
+      } else if (args.region) {
+        refPoints = (args.quad as Vec2[] | undefined) ?? quadOfRegion(args.region.area);
+      } else if (args.screen) {
+        // The key inside the corners, and the corners snapped to its edge.
+        const rough = (args.screen.corners as Vec2[]).map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2);
+        if (!quadCheck(rough).ok) throw new PlanarError("bad_args", "The screen's corners do not make a quad: give them as [UL, UR, LR, LL].");
+        const key = sampleKey(refPng!, rough);
+        if (!key) throw new PlanarError("bad_args", "The inside of those corners is not one saturated colour (a green or blue screen), so there is no key edge to follow. Use region for a screen showing a picture, or points on its corners and markers.");
+        const fit = fitScreenQuad(keyStrength(refPng!, key, [0, 0, refPng!.width, refPng!.height]), rough, Math.max(6, Math.round(12 * scale)));
+        if (!fit.ok) throw new PlanarError("bad_args", `The screen's outline was not found near those corners at ref_time: ${fit.why}. Give the corners within about 10 px of where the key colour ends.`);
+        o.screen_key = key;
+        refPoints = fit.corners.map((p) => [r4((p[0] + 0.5) / scale), r4((p[1] + 0.5) / scale)] as Vec2);
       } else if (args.points) {
         refPoints = args.points as Vec2[];
       } else {
@@ -1996,8 +2325,12 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         const patchImg = Math.max(9, Math.round(o.pattern_size * scale) | 1);
         const longer = regionLongerSide(ap.region);
         const minDist = (ap.min_distance_px ?? Math.max(o.pattern_size, longer / 10)) * scale;
-        const mask = regionMask(refPng!.width, refPng!.height, scale, ap.region, ap.exclude ?? [], o.pattern_size);
-        chosen = goodFeatures(boxBlurGray(toGray(refPng!), 1), mask, { count: ap.count, minDistancePx: minDist, patchSize: patchImg });
+        const full = regionMask(refPng!.width, refPng!.height, scale, ap.region, ap.exclude ?? [], o.pattern_size);
+        // Whole patterns inside the region: a point on its edge carries whatever is behind it (a background, an easel).
+        const inner = erodeMask(full, refPng!.width, refPng!.height, Math.floor(patchImg / 2));
+        const blurred = boxBlurGray(toGray(refPng!), 1);
+        chosen = goodFeatures(blurred, inner, { count: ap.count, minDistancePx: minDist, patchSize: patchImg, spread: true });
+        if (chosen.length < Math.min(ap.count, 4)) chosen = goodFeatures(blurred, full, { count: ap.count, minDistancePx: minDist, patchSize: patchImg, spread: true });
         await yieldLoop();
         if (chosen.length === 0) throw new PlanarError("not_found", "No trackable corner was found in that region (it is flat, too small or fully excluded). Widen the region or pick points by hand.");
         refPoints = chosen.map((c) => [r2((c.x + 0.5) / scale), r2((c.y + 0.5) / scale)] as Vec2);
@@ -2014,11 +2347,24 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         seed: 1234,
       });
       let state: TrackingState;
-      const quad: Vec2[] = stored ? stored.tracking!.quad : ((args.quad as Vec2[] | undefined) ?? boundingQuad(refPoints));
-      let fwd: MultiTracker | null = cached?.forward ?? null;
-      let bwd: MultiTracker | null = cached?.backward ?? null;
+      const quad: Vec2[] = stored ? stored.tracking!.quad : o.method === "screen" ? refPoints : ((args.quad as Vec2[] | undefined) ?? (o.method === "region" ? refPoints : boundingQuad(refPoints)));
+      let fwd: DirectionTracker | null = cached?.forward ?? null;
+      let bwd: DirectionTracker | null = cached?.backward ?? null;
       let dropped: Array<{ index: number; reason: string }>;
-      if (!stored) {
+      if (!stored && (o.method === "region" || o.method === "screen")) {
+        dropped = [];
+        const fw: number[] = refTime < end - 1e-9 ? trackTimes(refTime + 1 / fps, end, fps, MAX_TRACK_FRAMES) : [];
+        const bw: number[] = refTime > start + 1e-9 ? trackTimes(refTime - 1 / fps, start, fps, MAX_TRACK_FRAMES) : [];
+        state = {
+          options: o as unknown as Record<string, unknown>,
+          range: { start, end },
+          quad,
+          forward: emptyDirection(fw.length ? fw[0] : null, refPoints.length),
+          backward: emptyDirection(bw.length ? bw[0] : null, refPoints.length),
+          dropped,
+        };
+      } else if (!stored) {
+        o.area = verifyAreaFor({ quad: args.quad as Vec2[] | undefined, autoRegion: args.auto_points?.region, points: refPoints, patternSize: o.pattern_size });
         // Model: translate for one point, similarity for more, unless asked.
         const probe = new MultiTracker(refGray!, refPoints, scale, { ...mkOpts(), model: "translate" }, quad);
         const aliveN = probe.alive;
@@ -2049,15 +2395,39 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         dropped = state.dropped;
       }
       const opts = mkOpts();
-      const fresh = (): MultiTracker => new MultiTracker(refGray!, refPoints, scale, opts, quad);
-      if (!state.forward.done && !fwd) {
-        fwd = fresh();
-        if (stored) fwd.restore(state.forward.last_points, state.forward.last_H);
+      // The region (a region track's area, or where a points track is checked), built once when trackers are made.
+      let aligner: RegionAligner | null = null;
+      if (((!state.forward.done && !fwd) || (!state.backward.done && !bwd)) && o.area) {
+        try {
+          aligner = new RegionAligner(refGray!, regionMask(refGray!.width, refGray!.height, scale, o.area, o.exclude ?? [], 0));
+        } catch (err) {
+          if (o.method === "region") {
+            throw new PlanarError(
+              "bad_args",
+              `The region cannot be followed by its pixels: ${errMessage(err)}. A plain surface (a green screen without markers) has nothing to align: track its markers or corners with points, or widen the area to take in its edges and bezel.`
+            );
+          }
+          if (!stored) notes.push(`Frames are not checked against the surface (${errMessage(err)}): judge the track by the preview.`);
+        }
       }
-      if (!state.backward.done && !bwd) {
-        bwd = fresh();
-        if (stored) bwd.restore(state.backward.last_points, state.backward.last_H);
-      }
+      const fresh = (dir: "forward" | "backward"): DirectionTracker => {
+        const ds = state[dir];
+        if (o.method === "region") {
+          const d = new RegionDirection(aligner!, quad, scale, maxMisses);
+          if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
+          return d;
+        }
+        if (o.method === "screen") {
+          const d = new ScreenDirection(o.screen_key!, quad, scale, maxMisses);
+          if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
+          return d;
+        }
+        const mt = new MultiTracker(refGray!, refPoints, scale, opts, quad);
+        if (stored) mt.restore(ds.last_points, ds.last_H);
+        return aligner ? new VerifiedPoints(mt, aligner, scale, o.model === "perspective", maxMisses) : mt;
+      };
+      if (!state.forward.done && !fwd) fwd = fresh("forward");
+      if (!state.backward.done && !bwd) bwd = fresh("backward");
 
       // The reference frame itself.
       const aliveRef = refPoints.map((_, i) => !dropped.some((d) => d.index === i));
@@ -2077,7 +2447,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       const ends = { forward: null as End, backward: null as End };
       const run_ = { renderError: null as string | null, blocked: false, reacquired: 0 };
 
-      const run = async (dir: "forward" | "backward", mt: MultiTracker | null) => {
+      const run = async (dir: "forward" | "backward", mt: DirectionTracker | null) => {
         const ds = state[dir];
         if (ds.done || !mt || run_.renderError) return;
         const times = dir === "forward" ? trackTimes(ds.next_time as number, end, fps, MAX_TRACK_FRAMES) : trackTimes(ds.next_time as number, start, fps, MAX_TRACK_FRAMES);
@@ -2094,7 +2464,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
             break;
           }
           await yieldLoop();
-          const res = mt.step(prep(png), times[i]);
+          const res = mt.step(prep(png), times[i], png);
           await yieldLoop();
           if (res.stop) {
             ds.done = true;
@@ -2107,6 +2477,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           added.push(fr);
           ds.last_points = fr.points.map((p, k) => p ?? ds.last_points[k] ?? null);
           ds.last_H = mt.lastH;
+          if (mt.prevH) ds.prev_H = mt.prevH;
           ends[dir] = { png, frame: fr };
         }
         if (i >= times.length && !run_.renderError) {
@@ -2137,7 +2508,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
             created: new Date().toISOString(),
             tracking: state,
           };
-      remember(track.track_id, { forward: fwd, backward: bwd });
+      remember(track.track_id, Object.assign({ forward: fwd, backward: bwd }, { scale }));
       track.tracking!.options = o as unknown as Record<string, unknown>;
       if (track.tracking!.forward.done && track.tracking!.backward.done) flagUnreliableFrames(track);
       saveTrack(track);
@@ -2224,7 +2595,12 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
   const nextDir = !st.forward.done ? "forward" : !st.backward.done ? "backward" : null;
   const nextTime = nextDir === "forward" ? st.forward.next_time : nextDir === "backward" ? st.backward.next_time : null;
   const notes = [...ran.notes];
-  notes.push("Points must lie on one plane: a point on a different depth slides against the others and the fit gets worse (see rms_px).");
+  const method = (st.options as unknown as TrackOptionsStored).method ?? "points";
+  if (method === "screen") notes.push("A screen track follows where the key colour ends: the corners are where its sides' lines meet, so a corner covered by a hand is still placed from its sides. The ref_points are the snapped corners at ref_time.");
+  else if (method === "region") notes.push("The area must be one flat surface: whatever in it is at another depth (a frame's edge standing out, a shelf) moves differently and is pushed out of the fit, but a large part of it off the plane pulls the solve.");
+  else notes.push("Points must lie on one plane: a point on a different depth slides against the others and the fit gets worse (see rms_px).");
+  const lostDir = [st.forward, st.backward].find((d) => d.stop?.reason === "lost");
+  if (lostDir && lostDir.stop) notes.push(`A direction stopped at ${r2(lostDir.stop.time)} s: ${maxMissesFor(ran.fps)} frames in a row did not line up with the surface (gone, covered, or out of frame). Frames past it are not in the track; track that part again from a reference frame inside it.`);
   if (ran.temp) notes.push("isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
   if (ran.blocked) notes.push("AE stopped responding during a render (often a modal dialog); check ae_dialogs and continue the track.");
   const baseMismatches: ReceiptMismatch[] = [];
@@ -2285,7 +2661,8 @@ export const planarTools: ToolDefinition<any>[] = [
     description:
       "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). " +
       "Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). " +
-      "Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
+      "For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front are pushed out of the fit, and it is the most accurate (0.1-0.35 px on real plates, through a person walking in front). Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
+      "Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. " +
       "`isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). " +
       "Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. " +
       "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +

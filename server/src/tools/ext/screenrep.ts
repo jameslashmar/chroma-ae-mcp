@@ -34,9 +34,8 @@
  * out of scope). The tool reports it and asks for a roto layer of the user's.
  *
  * Unmeasured on AE 26 (the code works either way and reports what it found):
- * - CC Power Pin's point names and order, its match names, and whether its
- *   Expansion parameter exists and takes a percentage (else the corners are
- *   pushed outward by the same amount, as a Corner Pin needs);
+ * - CC Power Pin's point names and order, and its match names (its Expansion (%)
+ *   Top / Left / Right / Bottom were measured on AE 27.0: see expandQuad);
  * - Levels' parameter names and unit (the unit is read from the effect's own
  *   default Output White, so 0..1, 0..255 and 0..32768 all work), and whether the
  *   Gaussian Blur 'Blurriness' of 2.5 per pixel of sigma holds (planar.ts constant);
@@ -80,6 +79,7 @@ import {
 import { blurrinessFromSigma, createRenderBudget, PlanarError, resolveEffectParams, resolveTrackSource, TrackSourceSchema, withIsolatedPlate } from "./planar.js";
 import { blit, createCanvas, drawCross, drawLabel, drawLine, drawPolygon, encodePng, fitWithin, resizeArea, type RgbaImage } from "./png-utils.js";
 import { polygonArea, rasterizePolygon, srgbToLinear } from "./region-math.js";
+import { keyStrength, sampleKey } from "./screen-track.js";
 import { noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
 import { boxBlurGray, extractPatch, makeTemplate, toGray, type GrayImage } from "./track.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
@@ -107,190 +107,10 @@ const median = (a: number[]): number => {
 
 const mean = (a: number[]): number => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
 
-// ---------- gradients ----------
+// ---------- gradients and edges: edges.ts ----------
 
-export interface Gradients {
-  width: number;
-  height: number;
-  gx: Float32Array;
-  gy: Float32Array;
-  mag: Float32Array;
-}
-
-/** Sobel gradients in gray levels per pixel (the kernel is divided by 8). The one-pixel border is zero. */
-export function sobel(g: GrayImage): Gradients {
-  const { width: w, height: h, data: d } = g;
-  const gx = new Float32Array(w * h);
-  const gy = new Float32Array(w * h);
-  const mag = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      const a = d[i - w - 1];
-      const b = d[i - w];
-      const c = d[i - w + 1];
-      const l = d[i - 1];
-      const r = d[i + 1];
-      const e = d[i + w - 1];
-      const f = d[i + w];
-      const k = d[i + w + 1];
-      const sx = (c + 2 * r + k - (a + 2 * l + e)) / 8;
-      const sy = (e + 2 * f + k - (a + 2 * b + c)) / 8;
-      gx[i] = sx;
-      gy[i] = sy;
-      mag[i] = Math.hypot(sx, sy);
-    }
-  }
-  return { width: w, height: h, gx, gy, mag };
-}
-
-function bilinear(a: Float32Array, w: number, h: number, x: number, y: number): number {
-  const xc = clamp(x, 0, w - 1.001);
-  const yc = clamp(y, 0, h - 1.001);
-  const x0 = Math.floor(xc);
-  const y0 = Math.floor(yc);
-  const fx = xc - x0;
-  const fy = yc - y0;
-  const i = y0 * w + x0;
-  return (a[i] * (1 - fx) + a[i + 1] * fx) * (1 - fy) + (a[i + w] * (1 - fx) + a[i + w + 1] * fx) * fy;
-}
-
-// ---------- edges: ridge scan along a side, robust line, intersection ----------
-
-export type EdgePreference = "outer" | "inner" | "nearest";
-
-/** Weakest ridge (gray levels per pixel along the normal) that counts as an edge. */
-const MIN_EDGE = 3;
-
-export interface SideScan {
-  points: Vec2[];
-  strengths: number[];
-  /** Scan lines on which a second strong ridge sat more than 3 px from the chosen one. */
-  competing: number;
-  found: number;
-  expected: number;
-}
-
-/**
- * Looks for the edge along the side a -> b (image pixels, index coordinates).
- * At each of the sample positions along the side (the middle 80%, so rounded
- * ends and the corners themselves stay out) the gradient component along the
- * outward normal is sampled over +-searchPx; the ridges at least 0.6 of the
- * strongest one are the candidates and `prefer` picks one: the outermost (the
- * outer bezel edge, which screen content and reflections inside cannot fake),
- * the innermost, or the one nearest the guess. A second candidate more than
- * 3 px away is counted as competing. Sub-pixel by a parabola through the peak.
- */
-export function scanSide(gr: Gradients, a: Vec2, b: Vec2, outward: Vec2, o: { searchPx: number; prefer: EdgePreference }): SideScan {
-  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  const steps = Math.max(8, Math.min(200, Math.floor(len / 2)));
-  const step = 0.5;
-  const S = Math.max(2, o.searchPx);
-  const n = Math.floor((2 * S) / step) + 1;
-  const prof = new Float64Array(n);
-  const points: Vec2[] = [];
-  const strengths: number[] = [];
-  let competing = 0;
-  const { width: w, height: h } = gr;
-  for (let k = 0; k < steps; k++) {
-    const u = 0.1 + (0.8 * (k + 0.5)) / steps;
-    const px = a[0] + (b[0] - a[0]) * u;
-    const py = a[1] + (b[1] - a[1]) * u;
-    let top = 0;
-    for (let j = 0; j < n; j++) {
-      const d = -S + j * step;
-      const x = px + outward[0] * d;
-      const y = py + outward[1] * d;
-      if (x < 1 || y < 1 || x > w - 2 || y > h - 2) {
-        prof[j] = 0;
-        continue;
-      }
-      const sx = bilinear(gr.gx, w, h, x, y);
-      const sy = bilinear(gr.gy, w, h, x, y);
-      prof[j] = Math.abs(sx * outward[0] + sy * outward[1]);
-      if (prof[j] > top) top = prof[j];
-    }
-    if (top < MIN_EDGE) continue;
-    const peaks: number[] = [];
-    for (let j = 1; j < n - 1; j++) {
-      if (prof[j] > prof[j - 1] && prof[j] >= prof[j + 1] && prof[j] >= 0.6 * top && prof[j] >= MIN_EDGE) peaks.push(j);
-    }
-    if (peaks.length === 0) continue;
-    let pick = peaks[0];
-    if (o.prefer === "outer") pick = peaks[peaks.length - 1];
-    else if (o.prefer === "nearest") pick = peaks.reduce((best, j) => (Math.abs(-S + j * step) < Math.abs(-S + best * step) ? j : best), peaks[0]);
-    if (peaks.some((j) => Math.abs(j - pick) * step > 3)) competing++;
-    const l = prof[pick - 1];
-    const c = prof[pick];
-    const r = prof[pick + 1];
-    const den = l - 2 * c + r;
-    const off = den < 0 ? clamp((0.5 * (l - r)) / den, -0.5, 0.5) : 0;
-    const d = -S + (pick + off) * step;
-    points.push([px + outward[0] * d, py + outward[1] * d]);
-    strengths.push(c);
-  }
-  return { points, strengths, competing, found: points.length, expected: steps };
-}
-
-export interface Line {
-  /** A point on the line (the centroid of the inliers). */
-  c: Vec2;
-  /** Unit direction. */
-  dir: Vec2;
-  inliers: number;
-  total: number;
-  rms: number;
-}
-
-function totalLeastSquares(pts: Vec2[]): { c: Vec2; dir: Vec2 } {
-  const n = pts.length;
-  const cx = pts.reduce((s, p) => s + p[0], 0) / n;
-  const cy = pts.reduce((s, p) => s + p[1], 0) / n;
-  let sxx = 0;
-  let sxy = 0;
-  let syy = 0;
-  for (const p of pts) {
-    const dx = p[0] - cx;
-    const dy = p[1] - cy;
-    sxx += dx * dx;
-    sxy += dx * dy;
-    syy += dy * dy;
-  }
-  const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-  return { c: [cx, cy], dir: [Math.cos(ang), Math.sin(ang)] };
-}
-
-const distToLine = (p: Vec2, c: Vec2, dir: Vec2): number => Math.abs((p[0] - c[0]) * dir[1] - (p[1] - c[1]) * dir[0]);
-
-/**
- * A line through the points by total least squares, refitted on the points
- * within max(tol, 2.5 robust sigmas) of it until that set stops changing, so a
- * few points on a competing ridge or on a rounded end do not bend it. Null for
- * fewer than 6 points.
- */
-export function fitLine(pts: Vec2[], tol = 1): Line | null {
-  if (pts.length < 6) return null;
-  let use = pts;
-  let line = totalLeastSquares(use);
-  for (let it = 0; it < 4; it++) {
-    const res = pts.map((p) => distToLine(p, line.c, line.dir));
-    const thr = Math.max(tol, 2.5 * 1.4826 * median(res));
-    const next = pts.filter((_, i) => res[i] <= thr);
-    if (next.length < 6 || next.length === use.length) break;
-    use = next;
-    line = totalLeastSquares(use);
-  }
-  const rms = Math.sqrt(use.reduce((s, p) => s + distToLine(p, line.c, line.dir) ** 2, 0) / use.length);
-  return { c: line.c, dir: line.dir, inliers: use.length, total: pts.length, rms };
-}
-
-/** Where two lines meet. Null when they are within about 14 degrees of parallel. */
-export function intersectLines(a: Line, b: Line): Vec2 | null {
-  const cr = a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0];
-  if (Math.abs(cr) < 0.25) return null;
-  const t = ((b.c[0] - a.c[0]) * b.dir[1] - (b.c[1] - a.c[1]) * b.dir[0]) / cr;
-  return [a.c[0] + a.dir[0] * t, a.c[1] + a.dir[1] * t];
-}
+export { bilinear, fitLine, intersectLines, MIN_EDGE, scanSide, sobel, type EdgePreference, type Gradients, type Line, type SideScan } from "./edges.js";
+import { bilinear, fitLine, intersectLines, scanSide, sobel, type EdgePreference, type Gradients, type Line } from "./edges.js";
 
 /** Weakest Shi-Tomasi response (sum over 5x5) that counts as a corner. */
 const MIN_CORNER_SCORE = 30;
@@ -367,8 +187,12 @@ export interface CornerSnap {
  * window, else the guess itself. `patchSize` is the template side (image px) for
  * the trackability test (std at least 3 gray levels, the tracker's own test).
  */
-export function snapQuad(gray: GrayImage, guesses: Vec2[], o: { searchPx: number; prefer: EdgePreference; patchSize: number }): { corners: CornerSnap[]; sides: SideFit[] } {
-  const gr = sobel(gray);
+export function snapQuad(
+  gray: GrayImage,
+  guesses: Vec2[],
+  o: { searchPx: number; prefer: EdgePreference; patchSize: number; /** Where the edges are looked for (a key matte); default the gray image. */ edgeImage?: GrayImage }
+): { corners: CornerSnap[]; sides: SideFit[] } {
+  const gr = sobel(o.edgeImage ?? gray);
   const cx = mean(guesses.map((p) => p[0]));
   const cy = mean(guesses.map((p) => p[1]));
   const sides: SideFit[] = [];
@@ -607,6 +431,26 @@ export function quadMetrics(c: Vec2[]): { ok: boolean; reason?: string; area_px:
     area_px: polygonArea(c),
     edge_lengths_px: c.map((p, i) => r2(Math.hypot(c[(i + 1) % 4][0] - p[0], c[(i + 1) % 4][1] - p[1]))),
   };
+}
+
+/**
+ * The quad [UL, UR, LR, LL] with each edge pushed outward by `pct` percent of the screen's width (left,
+ * right) or height (top, bottom), through the quad's own perspective: what CC Power Pin's Expansion (%)
+ * Top / Left / Right / Bottom do (measured on AE 27.0: Top 10 on a 400 px layer moved its top edge 40 px).
+ * The pin maps the insert's rectangle onto the quad, so its edges, grown by pct of their length in the
+ * insert's own space, land here. Scaled about the centroid when the quad has no perspective solution.
+ */
+export function expandQuad(q: Vec2[], pct: number): Vec2[] {
+  if (!(pct !== 0)) return q.map((p) => [p[0], p[1]] as Vec2);
+  const e = pct / 100;
+  const unit: Vec2[] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const sol = solveModel("perspective", unit, q);
+  if (sol) {
+    const grown: Vec2[] = [[-e, -e], [1 + e, -e], [1 + e, 1 + e], [-e, 1 + e]];
+    const out = grown.map((u) => applyH(sol.H, u));
+    if (out.every((p) => p !== null)) return out as Vec2[];
+  }
+  return scaleQuad(q, 1 + 2 * e);
 }
 
 /** The quad scaled about its centroid. */
@@ -911,7 +755,7 @@ export interface InsertKeys {
   times: number[];
   /** The corners where the track puts them, in the insert layer's own space. */
   exact: { ul: Vec2[]; ur: Vec2[]; ll: Vec2[]; lr: Vec2[] };
-  /** The same corners pushed outward from the quad's centre by the expansion. */
+  /** The same corners with each edge pushed outward by the expansion (expandQuad), as CC Power Pin's Expansion (%) does. */
   expanded: { ul: Vec2[]; ur: Vec2[]; ll: Vec2[]; lr: Vec2[] };
   /** Layer transform keys (transform_pin only). */
   transform?: { position: Vec2[]; rotation: number[]; scale: Vec2[] };
@@ -932,8 +776,9 @@ const round2 = (v: Vec2): Vec2 => [r4(v[0]), r4(v[1])];
  * layer's own space: P(t) = M(t)^-1 . H(t) . corner, where M is the layer's matrix.
  * With `transform` M(t) follows the best similarity of the track (position,
  * rotation, scale around the anchor, which layer motion blur can blur) and the
- * pin keeps the rest of the perspective. `expansionPct` pushes the corners out
- * from the quad's centre in comp space before they are brought into layer space.
+ * pin keeps the rest of the perspective. `expansionPct` pushes each edge out by
+ * that percent of the screen's width or height (expandQuad), in comp space, before
+ * the corners are brought into layer space.
  */
 export function buildInsertKeys(a: { frames: PlanarFrame[]; refCorners: Vec2[]; compSize: Vec2; insertSize: Vec2; expansionPct: number; transform: boolean }): InsertKeys {
   const anchor: Vec2 = [a.insertSize[0] / 2, a.insertSize[1] / 2];
@@ -945,7 +790,6 @@ export function buildInsertKeys(a: { frames: PlanarFrame[]; refCorners: Vec2[]; 
   const times: number[] = [];
   const skipped: number[] = [];
   let maxFit = 0;
-  const grow = 1 + a.expansionPct / 100;
   for (const f of a.frames) {
     if (!f.ok || !f.H) {
       skipped.push(f.time);
@@ -979,7 +823,7 @@ export function buildInsertKeys(a: { frames: PlanarFrame[]; refCorners: Vec2[]; 
       return mapped.some((p) => p === null) ? null : (mapped as Vec2[]);
     };
     const ex = inLayer(moved);
-    const gx = inLayer(scaleQuad(moved, grow));
+    const gx = inLayer(expandQuad(moved, a.expansionPct));
     if (!ex || !gx) {
       skipped.push(f.time);
       continue;
@@ -1237,10 +1081,10 @@ export const AeScreenCornersSchema = z
     ref_time: z.number().min(0).optional().describe("The frame the corners are guessed on, in seconds. Default: the comp's current time if it is inside the comp, else the middle of the work area."),
     search_px: z.number().min(2).max(100).default(24).describe("How far (comp pixels) from each guess to look for the edge and the corner. Default 24."),
     edge: z
-      .enum(["outer", "inner", "nearest"])
-      .default("outer")
+      .enum(["auto", "key", "outer", "inner", "nearest"])
+      .default("auto")
       .describe(
-        "Which edge to take when a side shows two strong ones (a bezel and the picture inside it): the outermost (default: reflections and screen content inside cannot fake it), the innermost, or the one nearest the guess."
+        "Which edge to snap to. auto (default): where the key colour ends when the inside of the guesses is one saturated colour (a green or blue screen: the bezel's own edges cannot compete), else the outermost brightness edge. key: the key edge only. outer / inner / nearest: brightness edges, when a side shows two strong ones (a bezel and the picture inside it), the outermost (reflections and screen content inside cannot fake it), the innermost, or the one nearest the guess."
       ),
     insert_aspect: z.number().positive().optional().describe("The insert's width / height, when known (16/9 = 1.778). It is reported next to the estimate and is what a later ae_screen_replace should be given."),
     track: TrackSourceSchema.optional().describe("A planar track (a stored track_id, or any source ae_track_read takes) of this screen. With it the tool also reports whether a corner leaves the frame anywhere in the shot, and where the quad folds."),
@@ -1280,7 +1124,7 @@ export const AeScreenReplaceSchema = z
     insert_start: z.number().min(-10800).max(10800).optional().describe("Comp time (seconds) at which the insert's first frame plays. Default 0. The insert layer starts there, so the old screen shows before a positive insert_start (the keys before it are not visible); a negative one starts the insert partway in (the insert comp is lengthened to still cover the shot)."),
     plate: LayerSelectorSchema.optional().describe("The plate layer. The insert goes directly above it; reflections need it. Default: the top of the stack."),
     pin: z.enum(["power_pin", "corner_pin"]).default("power_pin").describe("CC Power Pin (default; it has an Expansion parameter and keys directly) or Corner Pin."),
-    expansion_pct: z.number().min(0).max(10).default(2).describe("Overscan under the bezel, percent of the screen. CC Power Pin: its Expansion parameter when it exists; otherwise (and for Corner Pin) the corners are pushed outward from the screen's centre by this much. 0 for none. Default 2."),
+    expansion_pct: z.number().min(0).max(10).default(1).describe("Overscan under the bezel: each edge is pushed outward by this percent of the screen's width (left, right) or height (top, bottom). CC Power Pin: its Expansion (%) Top, Left, Right and Bottom are set to it, so it can be changed in the effect afterwards; Corner Pin (or a Power Pin without those parameters): the corners in the keys are pushed out by the same amount. 0 for none. Default 1."),
     motion_blur: z
       .enum(["none", "transform_pin", "force"])
       .default("none")
@@ -1390,7 +1234,22 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
       const gray = toGray(frame.image);
       await yieldLoop();
       const patchImg = Math.max(9, Math.round(args.pattern_size * scale) | 1);
-      const snap = snapQuad(gray, guesses.map(toImg), { searchPx: args.search_px * scale, prefer: args.edge, patchSize: patchImg });
+      // A green or blue screen: its edges are where the key colour ends (measured on a laptop's green screen: the
+      // brightness edges were 2.5-5 px off, between the bezel's own edges; the key edge holds to the outline).
+      let edgeImage: GrayImage | undefined;
+      let prefer: EdgePreference = args.edge === "auto" || args.edge === "key" ? "outer" : args.edge;
+      let edgeUsed: string = prefer;
+      if (args.edge === "auto" || args.edge === "key") {
+        const key = sampleKey(frame.image, guesses.map(toImg));
+        if (key) {
+          edgeImage = keyStrength(frame.image, key, [0, 0, frame.image.width, frame.image.height]);
+          prefer = "nearest";
+          edgeUsed = "key";
+        } else {
+          edgeUsed = args.edge === "key" ? "outer (no key colour inside the guesses)" : "outer";
+        }
+      }
+      const snap = snapQuad(gray, guesses.map(toImg), { searchPx: args.search_px * scale, prefer, patchSize: patchImg, edgeImage });
       await yieldLoop();
       const snapped = snap.corners.map((c) => toComp(c.snapped));
       const points = quadCheck(snapped).ok ? suggestPoints(gray, snapped, { scale, count: args.point_count, patchSize: args.pattern_size }) : [];
@@ -1405,7 +1264,7 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
           excursions = cornerExcursions(based, quadCheck(snapped).ok ? snapped : guesses, [comp.width, comp.height]);
         }
       }
-      return { scale, snap, snapped, points, excursions, trackNote };
+      return { scale, snap, snapped, points, excursions, trackNote, edgeUsed };
     };
     let analysed: Awaited<ReturnType<typeof analyse>>;
     try {
@@ -1414,8 +1273,8 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
       if (!temp) throw err;
       return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage(err), temp, checkpoint, sessionFields } };
     }
-    const { scale, snap, snapped, points, excursions, trackNote } = analysed;
-    return { comp, refTime: frame.time, scale, frame: frame.image, snap, snapped, points, excursions, trackNote, temp, checkpoint, sessionFields };
+    const { scale, snap, snapped, points, excursions, trackNote, edgeUsed } = analysed;
+    return { comp, refTime: frame.time, scale, frame: frame.image, snap, snapped, points, excursions, trackNote, edgeUsed, temp, checkpoint, sessionFields };
   });
 
   if ("failure" in ran && ran.failure) {
@@ -1525,6 +1384,7 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
     comp: { id: comp.id, name: comp.name, width: comp.width, height: comp.height },
     ref_time: r4(ran.refTime),
     image_scale: r3(scale),
+    edge_used: ran.edgeUsed,
     corners: cornerRows,
     corners_snapped: snapped.map((p) => [r2(p[0]), r2(p[1])]),
     quad: { ...quad, convex: quad.ok },
@@ -1775,11 +1635,13 @@ export function replaceMismatches(plan: ReplacePlan, beforeRaw: unknown, afterRa
   const bl = written.look?.blur;
   if (bl) checkEffect(insert, "blur", bl.effect_index, 1, bl.wrote);
   // CC Power Pin's Expansion, when it was set as a parameter.
-  const exp = written.pin?.expansion as { mode?: string; matchName?: string; name?: string; value?: number } | undefined;
-  if (exp && exp.mode === "param" && typeof exp.value === "number") {
+  const exp = written.pin?.expansion as { mode?: string; params?: Array<{ side: string; matchName?: string; name?: string; value: number }> } | undefined;
+  if (exp && exp.mode === "param" && Array.isArray(exp.params)) {
     const pinFx = insert.effects.find((e) => e.index === written.pin?.effect_index);
-    const ep = pinFx?.params.find((x) => (exp.matchName ? x.matchName === exp.matchName : x.name === exp.name));
-    expectThat(m, typeof ep?.value === "number" && near(ep.value as number, exp.value, 1e-3 + Math.abs(exp.value) * 1e-3), "pin.expansion", exp.value, ep?.value, "CC Power Pin's Expansion in the read-back differs from what was written");
+    for (const want of exp.params) {
+      const ep = pinFx?.params.find((x) => (want.matchName ? x.matchName === want.matchName : x.name === want.name));
+      expectThat(m, typeof ep?.value === "number" && near(ep.value as number, want.value, 1e-3 + Math.abs(want.value) * 1e-3), `pin.expansion.${want.side}`, want.value, ep?.value, "CC Power Pin's Expansion in the read-back differs from what was written");
+    }
   }
   const forceIdx = (written.motion_blur as { force_effect_index?: number } | undefined)?.force_effect_index;
   if (plan.motionBlur === "force" && typeof forceIdx === "number") {
@@ -2234,7 +2096,7 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
   for (const s of skippedLook) notes.push(`Not done: ${s.step}: ${s.reason}.`);
   if (w.pin_fallback) notes.push(w.pin_fallback);
   const exp = w.pin?.expansion as { mode?: string } | undefined;
-  if (exp?.mode === "param") notes.push("CC Power Pin's Expansion parameter was set to the percentage given; its unit is unverified, so look at the bezel edge.");
+  if (exp?.mode === "param") notes.push(`CC Power Pin's Expansion (%) Top, Left, Right and Bottom were set to ${args.expansion_pct}: each edge reaches that percent of the screen's width or height under the bezel; change them in the effect to taste.`);
   if (exp?.mode === "values") notes.push("The corners were pushed outward by the expansion in the keys themselves.");
   if (w.pin && w.pin.kind === "power_pin") notes.push("CC Power Pin's point names were matched by name and by position; the parameter table is in pin.param_table: check it once on this AE.");
 

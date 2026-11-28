@@ -382,6 +382,64 @@
     return null;
   }
 
+  // CC Power Pin's overscan. On AE 27.0 "Expansion (%)" (-0008) is only a group header with no value; the
+  // values are the four that follow it, Top, Left, Right and Bottom (-0009 to -0012, -200 to 200), each
+  // pushing its edge out by that percent of the source's height or width (measured: Top 10 on a 400 px
+  // layer moved the top edge 40 px). Found by match name first (any language), then by English name after
+  // the header; an AE with a single "Expansion" value gets that one. Empty when there is none.
+  var EXPANSION_SIDES = [
+    { side: "top", matchName: "CC Power Pin-0009", name: "Top" },
+    { side: "left", matchName: "CC Power Pin-0010", name: "Left" },
+    { side: "right", matchName: "CC Power Pin-0011", name: "Right" },
+    { side: "bottom", matchName: "CC Power Pin-0012", name: "Bottom" }
+  ];
+
+  function hasValue(p) {
+    try {
+      return p.propertyType === PropertyType.PROPERTY && p.propertyValueType !== PropertyValueType.NO_VALUE && isNum(p.value);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function expansionParams(fx) {
+    var out = [];
+    var i;
+    var p;
+    for (i = 0; i < EXPANSION_SIDES.length; i++) {
+      p = null;
+      try {
+        p = fx.property(EXPANSION_SIDES[i].matchName);
+      } catch (e) {
+        p = null;
+      }
+      if (!p || !hasValue(p)) break;
+      out.push({ prop: p, side: EXPANSION_SIDES[i].side, name: p.name, matchName: p.matchName });
+    }
+    if (out.length === EXPANSION_SIDES.length) return out;
+    out = [];
+    var header = 0;
+    for (i = 1; i <= fx.numProperties; i++) {
+      try {
+        p = fx.property(i);
+      } catch (e2) {
+        p = null;
+      }
+      if (!p) continue;
+      if (header === 0) {
+        if (/^expan/i.test(String(p.name))) {
+          if (hasValue(p)) return [{ prop: p, side: "all", name: p.name, matchName: p.matchName }];
+          header = i;
+        }
+        continue;
+      }
+      var k = out.length;
+      if (k >= EXPANSION_SIDES.length || !hasValue(p) || String(p.name).toLowerCase() !== EXPANSION_SIDES[k].name.toLowerCase()) break;
+      out.push({ prop: p, side: EXPANSION_SIDES[k].side, name: p.name, matchName: p.matchName });
+    }
+    return out.length === EXPANSION_SIDES.length ? out : [];
+  }
+
   function paramTable(fx) {
     var t = [];
     var p;
@@ -750,19 +808,29 @@
             fx = addEffect(comp, layer, PIN_MATCH[pinKind], "pin");
             addedIdx = indexOfFx(fx);
             if (pinKind === "power_pin") {
-              var ep = findParam(fx, ["Expansion", "Expand"], null);
-              if (ep && args.expansion_pct > 0) {
+              var eps = expansionParams(fx);
+              if (eps.length > 0 && args.expansion_pct > 0) {
                 try {
-                  var epWant = clampToLimits(ep.prop, args.expansion_pct);
-                  ep.prop.setValue(epWant);
+                  var setTo = [];
+                  for (var ei = 0; ei < eps.length; ei++) {
+                    var epWant = clampToLimits(eps[ei].prop, args.expansion_pct);
+                    eps[ei].prop.setValue(epWant);
+                    setTo.push({ side: eps[ei].side, name: eps[ei].name, matchName: eps[ei].matchName, value: epWant });
+                  }
                   useValues = args.exact;
-                  expansion = { mode: "param", name: ep.name, matchName: ep.matchName, value: epWant };
+                  expansion = { mode: "param", params: setTo, value: setTo[0].value };
                 } catch (eEp) {
+                  // Put back what was set, so the expanded corners are not expanded twice.
+                  for (var ej = 0; ej < eps.length; ej++) {
+                    try {
+                      eps[ej].prop.setValue(0);
+                    } catch (eReset) {}
+                  }
                   look_skipped.push({ step: "power_pin_expansion", reason: "Expansion could not be set (" + String(eEp.message || eEp) + "); the corners were pushed outward instead" });
                   expansion = { mode: "values" };
                 }
               } else {
-                if (!ep && args.expansion_pct > 0) look_skipped.push({ step: "power_pin_expansion", reason: "CC Power Pin has no parameter named Expansion on this AE; the corners were pushed outward instead", param_table: paramTable(fx) });
+                if (eps.length === 0 && args.expansion_pct > 0) look_skipped.push({ step: "power_pin_expansion", reason: "CC Power Pin has no Expansion (%) parameters (Top, Left, Right, Bottom) on this AE; the corners were pushed outward instead", param_table: paramTable(fx) });
                 if (args.expansion_pct > 0) expansion = { mode: "values" };
                 else useValues = args.exact;
               }

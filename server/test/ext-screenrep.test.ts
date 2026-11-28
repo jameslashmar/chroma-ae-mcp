@@ -29,6 +29,7 @@ import {
   quadMetrics,
   replaceMismatches,
   scaleQuad,
+  expandQuad,
   scanSide,
   screenrepTools,
   snapQuad,
@@ -441,6 +442,25 @@ describe("measurements", () => {
     expect(flat.every((p) => SCREEN.some((c) => dist([p.x, p.y], c) < 6))).toBe(true);
   });
 
+  it("pushes a perspective quad's edges out along its own perspective (the corners stay on its diagonals)", () => {
+    const q: Vec2[] = [[100, 80], [420, 110], [400, 330], [130, 300]];
+    const g = expandQuad(q, 4);
+    const cross = (o: Vec2, a: Vec2, b: Vec2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    // UL and LR on the UL-LR diagonal, UR and LL on the other, and outside the quad.
+    expect(Math.abs(cross(q[0], q[2], g[0])) / dist(q[0], q[2])).toBeLessThan(1e-6);
+    expect(Math.abs(cross(q[0], q[2], g[2])) / dist(q[0], q[2])).toBeLessThan(1e-6);
+    expect(Math.abs(cross(q[1], q[3], g[1])) / dist(q[1], q[3])).toBeLessThan(1e-6);
+    expect(Math.abs(cross(q[1], q[3], g[3])) / dist(q[1], q[3])).toBeLessThan(1e-6);
+    for (let i = 0; i < 4; i++) expect(dist(g[i], [252, 205])).toBeGreaterThan(dist(q[i], [252, 205]));
+    // A rectangle: each edge out by 4% of the width or height.
+    const r = expandQuad([[0, 0], [200, 0], [200, 100], [0, 100]], 4);
+    expect(r[0][0]).toBeCloseTo(-8, 6);
+    expect(r[0][1]).toBeCloseTo(-4, 6);
+    expect(r[2][0]).toBeCloseTo(208, 6);
+    expect(r[2][1]).toBeCloseTo(104, 6);
+    expect(expandQuad(q, 0)).toEqual(q);
+  });
+
   it("describes a quad", () => {
     const m = quadMetrics(SCREEN);
     expect(m.ok).toBe(true);
@@ -507,10 +527,10 @@ describe("buildInsertKeys", () => {
     expect(keys.max_fit_px).toBe(0);
   });
 
-  it("pushes the corners out from the quad's centre by the expansion", () => {
-    const keys = buildInsertKeys({ frames: frames([identityH()]), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 10, transform: false });
+  it("pushes each edge out by the expansion, a percent of the screen's width or height, as CC Power Pin does", () => {
+    const keys = buildInsertKeys({ frames: frames([identityH()]), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 5, transform: false });
     // Screen 160 x 90 centred at (160, 95); the layer sits 80 px left of and 55 px above the comp's origin.
-    // 10% is 8 px and 4.5 px per side.
+    // 5% per edge is 8 px left and right, 4.5 px top and bottom.
     expect(keys.expanded.ul[0][0]).toBeCloseTo(-8, 3);
     expect(keys.expanded.ul[0][1]).toBeCloseTo(-9.5, 3);
     expect(keys.expanded.lr[0][0]).toBeCloseTo(168, 3);
@@ -624,7 +644,7 @@ describe("schemas", () => {
   const corners = SCREEN;
   it("ae_screen_corners takes a quad and needs expect only to isolate", () => {
     const a = AeScreenCornersSchema.parse({ comp_id: 1, corners });
-    expect(a).toMatchObject({ search_px: 24, edge: "outer", point_count: 6, pattern_size: 31, preview: true });
+    expect(a).toMatchObject({ search_px: 24, edge: "auto", point_count: 6, pattern_size: 31, preview: true });
     expect(AeScreenCornersSchema.safeParse({ comp_id: 1, corners: corners.slice(0, 3) }).success).toBe(false);
     expect(AeScreenCornersSchema.safeParse({ comp_id: 1, corners, search_px: 1 }).success).toBe(false);
     expect(AeScreenCornersSchema.safeParse({ comp_id: 1, corners, point_count: 9 }).success).toBe(false);
@@ -638,7 +658,7 @@ describe("schemas", () => {
   it("ae_screen_replace has its defaults, one insert, a plate for reflections, and an expect", () => {
     const base = { comp_id: 1, corners, track: { track_id: "t" }, insert: { item_id: 5 }, expect: expectArg };
     const a = AeScreenReplaceSchema.parse(base);
-    expect(a).toMatchObject({ fit: "fill", pin: "power_pin", expansion_pct: 2, motion_blur: "none", match_look: true, white_mode: "keep", reflections: false, reflection_opacity: 100, max_samples: 8, switch_off_source_layer: true, contact_sheet: true });
+    expect(a).toMatchObject({ fit: "fill", pin: "power_pin", expansion_pct: 1, motion_blur: "none", match_look: true, white_mode: "keep", reflections: false, reflection_opacity: 100, max_samples: 8, switch_off_source_layer: true, contact_sheet: true });
     expect(AeScreenReplaceSchema.safeParse({ ...base, insert: {} }).success).toBe(false);
     expect(AeScreenReplaceSchema.safeParse({ ...base, insert: { item_id: 5, layer: { index: 1 } } }).success).toBe(false);
     expect(AeScreenReplaceSchema.safeParse({ ...base, insert: { layer: { name: "Clip" } } }).success).toBe(true);
@@ -669,7 +689,8 @@ const P2 = (name: string, matchName: string, v: number[]) => new FakeProperty(na
 interface FxOpts {
   /** Levels' full-white value: 1 for 0..1, 255 for 8-bit. */
   unit?: number;
-  expansion?: boolean;
+  /** true: AE 27.0's Expansion (%) header and its Top, Left, Right, Bottom values; "single": one Expansion value. */
+  expansion?: boolean | "single";
   levelsParams?: boolean;
   blurParams?: boolean;
   /** Output Black cannot go below this. */
@@ -691,7 +712,12 @@ function makeEffect(matchName: string, o: FxOpts): FakeGroup {
   if (matchName === "CC Power Pin") {
     if (o.noPowerPin) throw new Error("Can not add property CC Power Pin");
     const props = [P2("Top Left", "x1", [0, 0]), P2("Top Right", "x2", [100, 0]), P2("Bottom Left", "x3", [0, 100]), P2("Bottom Right", "x4", [100, 100])];
-    if (o.expansion) props.push(P1("Expansion", "x5", 0));
+    if (o.expansion === "single") props.push(P1("Expansion", "x5", 0));
+    else if (o.expansion) {
+      props.push(P1("Perspective", "CC Power Pin-0006", 1), P1("Unstretch", "CC Power Pin-0007", 0));
+      props.push(new FakeProperty("Expansion (%)", "CC Power Pin-0008", PropertyValueType.NO_VALUE, null as unknown as number));
+      props.push(P1("Top", "CC Power Pin-0009", 0), P1("Left", "CC Power Pin-0010", 0), P1("Right", "CC Power Pin-0011", 0), P1("Bottom", "CC Power Pin-0012", 0));
+    }
     return new FakeGroup("Power Pin", matchName, props);
   }
   if (matchName === "ADBE Pro Levels2" || matchName === "ADBE Easy Levels2") {
@@ -865,15 +891,30 @@ describe("screenrep.jsx", () => {
     expect(fxNames(s.plate)).toEqual([]);
   });
 
-  it("uses CC Power Pin's Expansion parameter when it exists, and keeps the corners exact", () => {
+  it("sets CC Power Pin's Expansion (%) Top, Left, Right and Bottom (AE 27.0's layout), and keeps the corners exact", () => {
     const s = hostScene({ expansion: true });
     const { A } = s.hostLoad();
     const r = A.screenrepApply(applyArgs(s));
     expect(r.pin).toMatchObject({ values_used: "exact", expansion: { mode: "param", value: 2 } });
+    expect(r.pin.expansion.params.map((p: any) => [p.side, p.matchName, p.value])).toEqual([
+      ["top", "CC Power Pin-0009", 2],
+      ["left", "CC Power Pin-0010", 2],
+      ["right", "CC Power Pin-0011", 2],
+      ["bottom", "CC Power Pin-0012", 2],
+    ]);
     expect(r.look_skipped).toEqual([]);
     const pin = fxByMatch(s.comp.layer(r.insert_layer.index)!, "CC Power Pin");
-    expect(paramOf(pin, "Expansion").value).toBe(2);
+    for (const side of ["Top", "Left", "Right", "Bottom"]) expect(paramOf(pin, side).value).toBe(2);
     expect((paramOf(pin, "Top Left").keyValue(1) as number[]).slice(0, 2)).toEqual(applyArgs(s).exact.ul[0]);
+  });
+
+  it("uses a single Expansion value where a CC Power Pin has one", () => {
+    const s = hostScene({ expansion: "single" });
+    const { A } = s.hostLoad();
+    const r = A.screenrepApply(applyArgs(s));
+    expect(r.pin).toMatchObject({ values_used: "exact", expansion: { mode: "param", value: 2 } });
+    expect(r.pin.expansion.params).toHaveLength(1);
+    expect(paramOf(fxByMatch(s.comp.layer(r.insert_layer.index)!, "CC Power Pin"), "Expansion").value).toBe(2);
   });
 
   it("falls back to a Corner Pin when CC Power Pin cannot be used, in the same undo group", () => {
@@ -1271,8 +1312,8 @@ describe("screenrep.jsx", () => {
     expect(paths).toEqual(expect.arrayContaining(["levels.out_black", "insert_comp.size", "keys.ul.numKeys"]));
     // CC Power Pin's Expansion that did not stick is caught.
     const exp = JSON.parse(JSON.stringify(after));
-    exp.details[0].effects.find((e: any) => e.matchName === "CC Power Pin").params.find((p: any) => /Expansion/.test(p.name)).value = 77;
-    expect(replaceMismatches(plan, before, exp, w).map((m) => m.path)).toContain("pin.expansion");
+    exp.details[0].effects.find((e: any) => e.matchName === "CC Power Pin").params.find((p: any) => p.name === "Top").value = 77;
+    expect(replaceMismatches(plan, before, exp, w).map((m) => m.path)).toContain("pin.expansion.top");
     const gone = JSON.parse(JSON.stringify(after));
     gone.details = [];
     expect(replaceMismatches(plan, before, gone, w)[0].path).toBe("insert_layer");
@@ -1581,7 +1622,7 @@ describe("ae_screen_replace", () => {
     expect(fns.slice(iWrite + 2).length).toBeGreaterThanOrEqual(2);
     const w = ae.calls[iWrite];
     expect(w.script).toContain('"expect"');
-    expect(w.args).toMatchObject({ comp_id: 1, name: "Clip.mov", pin: "power_pin", expansion_pct: 2, motion_blur: "none" });
+    expect(w.args).toMatchObject({ comp_id: 1, name: "Clip.mov", pin: "power_pin", expansion_pct: 1, motion_blur: "none" });
     expect(w.args.insert).toEqual({ item_id: 55 });
     expect(w.args.plate).toEqual({ index: 2, id: 100 });
     // The source is 1920 x 1080 and filled: the comp has the screen's aspect and one side of the source.
@@ -1805,7 +1846,7 @@ describe("ae_screen_replace", () => {
     const { ae } = await run(base("trk_sr_12", { ref_time: 0.3, match_look: false, contact_sheet: false }));
     const w = ae.calls.find((c) => c.fn === "screenrepApply")!.args;
     const i = w.times.findIndex((t: number) => Math.abs(t - 0.3) < 1e-9);
-    const identity = buildInsertKeys({ frames: [{ time: 0, ok: true, H: identityH(), points: [], confidence: [], rms_px: 0, inliers: 4 }], refCorners: SCREEN, compSize: [W, H], insertSize: w.insert_size, expansionPct: 2, transform: false });
+    const identity = buildInsertKeys({ frames: [{ time: 0, ok: true, H: identityH(), points: [], confidence: [], rms_px: 0, inliers: 4 }], refCorners: SCREEN, compSize: [W, H], insertSize: w.insert_size, expansionPct: 1, transform: false });
     expect(w.expanded.ul[i][0]).toBeCloseTo(identity.expanded.ul[0][0], 2);
     expect(w.expanded.ul[i][1]).toBeCloseTo(identity.expanded.ul[0][1], 2);
   });
