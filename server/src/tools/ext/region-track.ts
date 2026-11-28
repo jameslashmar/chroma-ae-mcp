@@ -196,9 +196,77 @@ function select(a: Float64Array, n: number, k: number): number {
   return a[k];
 }
 
-/** Solves the symmetric 8 x 8 system A x = b in place by Gaussian elimination with pivoting. Null when singular. */
-function solve8(A: Float64Array, b: Float64Array): Float64Array | null {
-  const n = 8;
+/**
+ * What a fit may change, as a basis of the 8 homography parameters: all of them, the affine 6 (no change of
+ * perspective), or a similarity (shift, rotation, uniform scale). A part-hidden surface may not hold all 8
+ * (a laptop screen with its right edge under a hand has nothing to fix its width by): the fewer parameters are
+ * solved on top of the motion so far, which carries the rest.
+ */
+export type FitModel = "perspective" | "affine" | "similarity";
+
+const BASES: Record<FitModel, number[][]> = {
+  perspective: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [0, 1, 2, 3, 4, 5, 6, 7].map((j) => (i === j ? 1 : 0))),
+  affine: [0, 1, 2, 3, 4, 5].map((i) => [0, 1, 2, 3, 4, 5, 6, 7].map((j) => (i === j ? 1 : 0))),
+  // a: uniform scale, b: rotation, then the shift.
+  similarity: [
+    [1, 0, 0, 0, 1, 0, 0, 0],
+    [0, -1, 0, 1, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 1, 0, 0],
+  ],
+};
+
+/** B^T A B (A is 8 x 8, the basis has m rows of 8). */
+function reduceA(A: Float64Array, basis: number[][]): Float64Array {
+  const m = basis.length;
+  const out = new Float64Array(m * m);
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < m; j++) {
+      let v = 0;
+      for (let p = 0; p < 8; p++) {
+        if (basis[i][p] === 0) continue;
+        for (let q = 0; q < 8; q++) if (basis[j][q] !== 0) v += basis[i][p] * A[p * 8 + q] * basis[j][q];
+      }
+      out[i * m + j] = v;
+    }
+  }
+  return out;
+}
+
+/** The m x m inverse expanded back to an 8 x 8 covariance: B^T (B A B^T)^-1 B. Null when singular. */
+function expandInverse(Am: Float64Array, basis: number[][]): Float64Array | null {
+  const m = basis.length;
+  const inv = invertN(Am, m);
+  if (!inv) return null;
+  const out = new Float64Array(64);
+  for (let p = 0; p < 8; p++) {
+    for (let q = 0; q < 8; q++) {
+      let v = 0;
+      for (let i = 0; i < m; i++) {
+        if (basis[i][p] === 0) continue;
+        for (let j = 0; j < m; j++) if (basis[j][q] !== 0) v += basis[i][p] * inv[i * m + j] * basis[j][q];
+      }
+      out[p * 8 + q] = v;
+    }
+  }
+  return out;
+}
+
+function invertN(A: Float64Array, n: number): Float64Array | null {
+  const out = new Float64Array(n * n);
+  const e = new Float64Array(n);
+  for (let c = 0; c < n; c++) {
+    e.fill(0);
+    e[c] = 1;
+    const col = solveN(A, e, n);
+    if (!col) return null;
+    for (let r = 0; r < n; r++) out[r * n + c] = col[r];
+  }
+  return out;
+}
+
+/** Solves the n x n system A x = b by Gaussian elimination with pivoting. Null when singular. */
+function solveN(A: Float64Array, b: Float64Array, n: number): Float64Array | null {
   const m = new Float64Array(n * (n + 1));
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) m[i * (n + 1) + j] = A[i * n + j];
@@ -232,18 +300,7 @@ function solve8(A: Float64Array, b: Float64Array): Float64Array | null {
   return x;
 }
 
-function inverse8(A: Float64Array): Float64Array | null {
-  const out = new Float64Array(64);
-  const e = new Float64Array(8);
-  for (let c = 0; c < 8; c++) {
-    e.fill(0);
-    e[c] = 1;
-    const col = solve8(A, e);
-    if (!col) return null;
-    for (let r = 0; r < 8; r++) out[r * 8 + c] = col[r];
-  }
-  return out;
-}
+
 
 const scaleH = (H: Mat3, s: number): Mat3 => mulH(mulH([1 / s, 0, 0, 0, 1 / s, 0, 0, 0, 1], H), [s, 0, 0, 0, s, 0, 0, 0, 1]);
 const unscaleH = (H: Mat3, s: number): Mat3 => mulH(mulH([s, 0, 0, 0, s, 0, 0, 0, 1], H), [1 / s, 0, 0, 0, 1 / s, 0, 0, 0, 1]);
@@ -357,7 +414,9 @@ export class RegionAligner {
    * at a finer level than the coarsest (for a refinement of a motion that is already close). Null with a
    * reason when the region leaves the frame or the fit diverges.
    */
-  align(frame: GrayImage[], H0: Mat3, prior: Float32Array[] | null = null, fromLevel?: number): AlignResult | { failed: string } {
+  align(frame: GrayImage[], H0: Mat3, prior: Float32Array[] | null = null, fromLevel?: number, model: FitModel = "perspective"): AlignResult | { failed: string } {
+    const basis = BASES[model];
+    const mdim = basis.length;
     const top = Math.min(this.levels.length - 1, fromLevel ?? this.levels.length - 1);
     let H = H0.slice();
     const weights: Float32Array[] = new Array(this.levels.length);
@@ -497,8 +556,13 @@ export class RegionAligner {
         }
         lastSig2 = sw2 > 8 ? se2 / sw2 : 0;
         sigma = sig;
-        const dp = solve8(A, bv);
-        if (!dp) return { failed: "the fit is singular (the region has texture in one direction only)" };
+        const Am = reduceA(A, basis);
+        const bm = new Float64Array(mdim);
+        for (let i = 0; i < mdim; i++) for (let p = 0; p < 8; p++) bm[i] += basis[i][p] * bv[p];
+        const dm = solveN(Am, bm, mdim);
+        if (!dm) return { failed: "the fit is singular (the region has texture in one direction only)" };
+        const dp = new Float64Array(8);
+        for (let i = 0; i < mdim; i++) for (let p = 0; p < 8; p++) dp[p] += basis[i][p] * dm[i];
         const Wn: Mat3 = [1 + dp[0], dp[1], dp[2], dp[3], 1 + dp[4], dp[5], dp[6], dp[7], 1];
         const Wp = mulH(L.Ninv, mulH(Wn, L.N));
         const Wi = invertH(Wp);
@@ -544,7 +608,7 @@ export class RegionAligner {
         } else {
           ncc = 0;
         }
-        const inv = inverse8(A);
+        const inv = expandInverse(reduceA(A, basis), basis);
         cov = inv ? inv.map((v) => v * lastSig2) : null;
         const ca = this.cellAgreement(L, ok, iv);
         // The agreeing cells' own grip on the motion, against the whole fit's, at the region's corners.
@@ -558,7 +622,7 @@ export class RegionAligner {
           for (let j = 0; j < i; j++) am[i * 8 + j] = am[j * 8 + i];
           am[i * 8 + i] += 1e-6;
         }
-        const invm = inverse8(am);
+        const invm = expandInverse(reduceA(am, basis), basis);
         const [bx0, by0, bx1, by1] = this.box;
         const corners: Vec2[] = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
         const whole = cov ? this.errorFromCov(cov, H, corners) : null;
@@ -751,6 +815,8 @@ export interface RegionStep {
   /** Expected error over the quad, image px. */
   expected_px: number | null;
   cells: CellAgreement | null;
+  /** What the frame was solved with: all 8 parameters, or fewer on top of the motion so far. */
+  model: FitModel | null;
   note?: string;
   /** Frames in a row without a verdict, this one included. */
   misses: number;
@@ -758,7 +824,10 @@ export interface RegionStep {
 
 /**
  * One direction of a region track: frames in order, away from the reference frame. Starts from the
- * last two good frames' motion; a frame that fails is retried from the last good motion, then held.
+ * last two good frames' motion (carried on at the same speed); a frame that fails is retried from the last
+ * good motion. When the visible part cannot hold all 8 parameters (part of the surface hidden), the frame
+ * is solved as an affine, then a similarity, on top of the predicted motion, which carries the rest; only
+ * a frame none of these line up is reported and held.
  */
 export class RegionTracker {
   Hprev: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -788,8 +857,16 @@ export class RegionTracker {
     if (inv2 && pred.some((v, i) => Math.abs(v - this.Hprev[i]) > 1e-9)) tries.push(this.Hprev);
     let best: AlignResult | null = null;
     let why = "";
-    for (const start of tries) {
-      const r = this.aligner.align(pyr, start, this.prior);
+    let model: FitModel = "perspective";
+    const attempts: Array<{ start: Mat3; model: FitModel }> = [
+      ...tries.map((start) => ({ start, model: "perspective" as FitModel })),
+      { start: pred, model: "affine" },
+      { start: pred, model: "similarity" },
+    ];
+    for (const at of attempts) {
+      // A fit with fewer parameters is only for a surface the full fit could not hold, not one that is gone.
+      if (at.model !== "perspective" && best && !(best.ncc >= VERDICT_NCC && best.coverage >= VERDICT_COVERAGE)) break;
+      const r = this.aligner.align(pyr, at.start, this.prior, undefined, at.model);
       if ("failed" in r) {
         why = r.failed;
         continue;
@@ -803,6 +880,7 @@ export class RegionTracker {
       const jump = verdict(r) ? this.jumped(r.H, pred) : null;
       if (verdict(r) && !jump) {
         best = r;
+        model = at.model;
         why = "";
         break;
       }
@@ -819,19 +897,30 @@ export class RegionTracker {
       this.Hprev2 = this.Hprev;
       this.Hprev = best.H;
       this.misses = 0;
-      return { ok: true, H: best.H, ncc: best.ncc, coverage: best.coverage, expected_px: this.aligner.expectedError(best, this.grid), cells: best.cells, misses: 0 };
+      return {
+        ok: true,
+        H: best.H,
+        ncc: best.ncc,
+        coverage: best.coverage,
+        expected_px: this.aligner.expectedError(best, this.grid),
+        cells: best.cells,
+        model,
+        misses: 0,
+        ...(model !== "perspective" ? { note: `solved as ${model === "affine" ? "an affine" : "a similarity"} on top of the motion so far: too little of the surface was visible to fix its perspective` } : {}),
+      };
     }
     // Hold still from the last good frame: the next one starts from there.
     this.Hprev2 = this.Hprev;
     this.misses++;
-    return { ok: false, H: this.Hprev, ncc: best ? best.ncc : null, coverage: best ? best.coverage : null, expected_px: null, cells: best ? best.cells : null, note: why || "the region could not be aligned", misses: this.misses };
+    return { ok: false, H: this.Hprev, ncc: best ? best.ncc : null, coverage: best ? best.coverage : null, expected_px: null, cells: best ? best.cells : null, model: null, note: why || "the region could not be aligned", misses: this.misses };
   }
 
   /**
    * A fit that lands far from where the motion was going is a wrong solution that happened to match a
-   * few cells (seen: a laptop screen half out of frame "found" 800 px away). Allowed: 30% of the
-   * surface's size per frame since the last good one (up to its full size), plus 20 px, and an area
-   * change under 2.5 times.
+   * few cells (seen: a laptop screen half out of frame "found" 800 px away; a hand leaving a screen's
+   * corner bent that corner 20 px in while the rest held). Allowed: on average 30% of the surface's size
+   * per frame since the last good one (up to its full size) plus 20 px; any one corner 4% of the size per
+   * frame plus 3 px beyond the others' shift; an area change under 2.5 times.
    */
   private jumped(H: Mat3, pred: Mat3): string | null {
     const a = this.quadImg.map((p) => applyH(H, p));
@@ -844,6 +933,12 @@ export class RegionTracker {
     const size = Math.max(Math.hypot(qb[0][0] - qb[2][0], qb[0][1] - qb[2][1]), Math.hypot(qb[1][0] - qb[3][0], qb[1][1] - qb[3][1]));
     const allowed = Math.min(1, 0.3 * (1 + this.misses)) * size + 20;
     if (d > allowed) return `the fit jumped ${Math.round(d)} px from where the motion was going (more than ${Math.round(allowed)} px): a wrong match`;
+    // One corner moving against the others: the shift every corner shares is taken out first.
+    const sx = qa.reduce((t, p, i) => t + p[0] - qb[i][0], 0) / 4;
+    const sy = qa.reduce((t, p, i) => t + p[1] - qb[i][1], 0) / 4;
+    const own = Math.max(...qa.map((p, i) => Math.hypot(p[0] - qb[i][0] - sx, p[1] - qb[i][1] - sy)));
+    const ownAllowed = Math.min(1, 0.04 * (1 + this.misses)) * size + 3;
+    if (own > ownAllowed) return `one corner moved ${Math.round(own)} px against the others in one frame (more than ${Math.round(ownAllowed)} px): a wrong match`;
     const area = (q: Vec2[]) => Math.abs(q.reduce((s, p, i) => s + p[0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * p[1], 0)) / 2;
     const ratio = area(qa) / Math.max(1e-9, area(qb));
     if (!(ratio < 2.5 && ratio > 0.4)) return `the surface's area changed ${Math.round(ratio * 100) / 100} times in one frame: a wrong match`;
