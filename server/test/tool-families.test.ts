@@ -81,7 +81,7 @@ describe("the real families", () => {
 
   it("the merged schema: an action enum, every member's fields, and which actions take a field", () => {
     const s = familyTool("ae_track")!.inputJsonSchema as any;
-    expect(s.properties.action.enum).toEqual(["point", "multi", "read", "apply"]);
+    expect(s.properties.action.enum).toEqual(["point", "multi", "read", "apply", "join"]);
     expect(s.required).toEqual(["action"]);
     expect(s.properties.expect).toBeDefined();
     // ae_captions keeps working without an action, so it requires none.
@@ -90,7 +90,7 @@ describe("the real families", () => {
     expect(c.properties.action.description).toContain("Default build");
     for (const [k, v] of Object.entries<any>(s.properties)) {
       if (k === "action") continue;
-      if (typeof v.description === "string" && v.description.startsWith("[")) expect(v.description).toMatch(/^\[(point|multi|read|apply)(, (point|multi|read|apply))*\]/);
+      if (typeof v.description === "string" && v.description.startsWith("[")) expect(v.description).toMatch(/^\[(point|multi|read|apply|join)(, (point|multi|read|apply|join))*\]/);
     }
   });
 

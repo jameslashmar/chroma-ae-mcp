@@ -13,7 +13,7 @@ Why core is the default (measured 2026-11-27): Claude Code 2.1.332 over HTTP sen
 
 The counts in this file are for the tools themselves: the three meta-tools below are not in the 184.
 
-- **full** (on request: `X-Chroma-Toolset: full`): all 186 tools as 135 entries, because 19 [tool families](#tool-families) stand in for 70 of them; about 784,000 characters (807,000 before the families). Every other tool is listed exactly as it defines itself. No meta-tools are listed and `initialize` sends no `instructions`. Use it only for a client that loads tool schemas on demand; Claude Code 2.1.332 did not (above).
+- **full** (on request: `X-Chroma-Toolset: full`): all 187 tools as 135 entries, because 19 [tool families](#tool-families) stand in for 71 of them; about 784,000 characters (807,000 before the families). Every other tool is listed exactly as it defines itself. No meta-tools are listed and `initialize` sends no `instructions`. Use it only for a client that loads tool schemas on demand; Claude Code 2.1.332 did not (above).
 - **core** (the default): 34 everyday tools with shortened text, plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`. The list and the `instructions` that `initialize` returns (the safety text once, how to use the three tools, the group index) are held to 74,000 characters (about 18,500 tokens; measured 72,496 on 2026-11-27, down from 85,210) by a test. A large optional argument (`ae_set_text` style, paragraph, box, ranges and paragraphs; `ae_layer_ops` where; `ae_create_layer` light options and placement; `ae_multi_comp_apply` op; `ae_render_queue_edit` output modules; `ae_import_assets` interpret and rules) is listed as one line: every field with its type, optionality and enum values, and `ae_get_tool_schema` for the per-field text and bounds. Required arguments, `expect` and the edit payloads (`ae_batch_set` ops, effect params) stay whole, and the server checks every call against the full schema. We added it because it is **not confirmed** that Claude Desktop defers tool schemas the way Claude Code does, and 200,000 tokens of schemas per conversation is too much to risk.
 
 The shortened text keeps every property name, type, enum, `required` and nested structure; only descriptions shrink (the first clause; 28 of the 33 tools have a hand-written summary, and a few untyped values such as `ae_set_property.value`, `ae_batch_set` `ops[].value` and the effect `params[].value` keep up to 400-600 characters because their text is the only description of what they accept). Calls are always validated against the full schema.
@@ -50,7 +50,7 @@ Five families share their name with the member that was there before (`ae_captio
 | `ae_captions` | `build` (`ae_captions`, the default), `plan`, `read`, `export`, `qa` (`ae_captions_<action>`) |
 | `ae_rig` | `add_controls`, `link`, `unlink`, `rename`, `list` (`ae_rig_<action>`) |
 | `ae_path` | `read`, `write`, `operator`, `link`, `connector` (`ae_path_<action>`) |
-| `ae_track` | `point`, `multi`, `read`, `apply` (`ae_track_<action>`) |
+| `ae_track` | `point`, `multi`, `read`, `apply`, `join` (`ae_track_<action>`) |
 | `ae_patch` | `check`, `color_match`, `grain`, `finish` (`ae_patch_<action>`) |
 | `ae_checkpoint` | `create`, `list`, `revert` (`ae_checkpoint_<action>`) |
 | `ae_skill` | `list`, `save`, `run` (`ae_skill_<action>`) |

@@ -54,21 +54,27 @@ interface KeyState {
   colour: number[];
   cb: number;
   cw: number;
+  despot?: number;
 }
 
-/** The plate's pixel; a screen that is no key colour (`grey`) for the refusal test. */
-function platePx(x: number, y: number, t: number, grey: boolean): number[] {
+/** Blue tracking markers on the screen, fixed to it: 6 x 6 px squares. */
+const MARKERS: Array<[number, number]> = [[110, 25], [125, 90], [40, 95], [100, 40]];
+const BLUE = [52, 84, 230];
+const onMarker = (x: number, y: number) => MARKERS.some(([mx, my]) => x >= mx && x < mx + 6 && y >= my && y < my + 6);
+
+/** The plate's pixel; a screen that is no key colour (`grey`) for the refusal test; with or without markers. */
+function platePx(x: number, y: number, t: number, grey: boolean, markers = false): number[] {
   const a = cover(x, y, t);
-  const screen = grey ? [120, 120, 125] : GREEN;
+  const screen = grey ? [120, 120, 125] : markers && onMarker(x, y) ? BLUE : GREEN;
   if (!inArea(x, y)) return [40, 40, 45];
   // The old screen bleeds into the subject's edge: its colour mixed in where the coverage is under 1.
   return [0, 1, 2].map((c) => a * SKIN[c] + (1 - a) * screen[c]);
 }
 
-/** A Keylight stand-in: the raw matte is 0.1 on the screen and 0.88 inside the subject, clipped as set. */
-function keyAlpha(x: number, y: number, t: number, k: KeyState): number {
+/** A Keylight stand-in: the raw matte is 0.1 on the screen and 0.88 inside the subject, clipped as set; markers are opaque unless their colour was changed to the key's. */
+function keyAlpha(x: number, y: number, t: number, k: KeyState, markers = false, changed = false): number {
   if (!inArea(x, y)) return 1;
-  const raw = 0.1 + 0.78 * cover(x, y, t);
+  const raw = markers && onMarker(x, y) && cover(x, y, t) < 0.5 && !changed ? 0.95 : 0.1 + 0.78 * cover(x, y, t);
   const lo = k.cb / 100;
   const hi = k.cw / 100;
   return Math.min(1, Math.max(0, (raw - lo) / Math.max(1e-3, hi - lo)));
@@ -89,6 +95,7 @@ function png(f: (x: number, y: number) => number[]): PNG {
 
 interface FakeOpts {
   grey?: boolean;
+  markers?: boolean;
   existing?: "all" | "some";
   info?: Record<string, any>;
   insert?: Record<string, any>;
@@ -108,6 +115,7 @@ function fakeAe(opts: FakeOpts = {}) {
   const wrap = { opacity: 0, colour: [0, 1, 0], map: 1, light: 2 };
   let grow = 2;
   let mb: { angle: number; phase: number } | null = null;
+  let ctc: { from: number[]; to: number[] } | null = null;
   let built = opts.existing === "all";
   const ok = (result: unknown) => ({ ok: true, result, durationMs: 1 });
   const layerRead = (id: number, index: number, o: Record<string, unknown> = {}) => ({ index, id, name: `L${id}`, enabled: true, blending_mode: "normal", matte_id: null, matte_type: "none", opacity: 100, source_id: null, effects: [], ...o });
@@ -121,7 +129,12 @@ function fakeAe(opts: FakeOpts = {}) {
       insert: layerRead(IDS.insert, 6, { effects: mb ? [{ match: "CC Force Motion Blur", enabled: true, params: { "CC Force Motion Blur-0003": mb.angle, "CC Force Motion Blur-0005": mb.phase } }] : [] }),
     },
     inner: {
-      key: layerRead(70, 1, { effects: [{ match: "Keylight 906", enabled: key.enabled, params: { "Keylight 906-0019": 2, "Keylight 906-0004": [...key.colour, 1], "Keylight 906-0012": key.cb, "Keylight 906-0013": key.cw } }] }),
+      key: layerRead(70, 1, {
+        effects: [
+          ...(ctc ? [{ match: "ADBE Change To Color", enabled: true, params: { "ADBE Change To Color-0001": [...ctc.from, 1], "ADBE Change To Color-0002": [...ctc.to, 1] } }] : []),
+          { match: "Keylight 906", enabled: key.enabled, params: { "Keylight 906-0019": 2, "Keylight 906-0004": [...key.colour, 1], "Keylight 906-0012": key.cb, "Keylight 906-0013": key.cw, "Keylight 906-0018": key.despot ?? 0 } },
+        ],
+      }),
       area: layerRead(71, 1, { effects: [{ match: "ADBE Minimax", enabled: true, params: { "ADBE Minimax-0002": grow } }] }),
       wrap: [layerRead(72, 1, { name: "alpha", blending_mode: "multiply" }), layerRead(73, 2, { effects: [{ match: "ADBE Invert", enabled: true, params: {} }, { match: "ADBE Box Blur2", enabled: true, params: { "ADBE Box Blur2-0001": wrap.map } }] })],
     },
@@ -190,6 +203,7 @@ function fakeAe(opts: FakeOpts = {}) {
             if (k.colour) key.colour = k.colour;
             if (k.clip_black !== undefined) key.cb = k.clip_black;
             if (k.clip_white !== undefined) key.cw = k.clip_white;
+            if (k.despot_white !== undefined) key.despot = k.despot_white;
           }
           const w = args.wrap;
           if (w) {
@@ -200,6 +214,8 @@ function fakeAe(opts: FakeOpts = {}) {
           }
           if (args.grow_px !== undefined) grow = args.grow_px;
           if (args.insert_mb) mb = args.insert_mb;
+          if (args.markers === null) ctc = null;
+          else if (args.markers) ctc = { from: args.markers.from, to: args.markers.to };
           return ok({ set: ["done"], insert_mb: args.insert_mb ?? null });
         }
         if (args.mode === "remove") return ok({ removed: { layers: ["a", "b", "c", "d", "e"], comps: ["K", "A", "W"] } });
@@ -216,13 +232,13 @@ function fakeAe(opts: FakeOpts = {}) {
         if (args.comp_id === IDS.area) pic = png((x, y) => [255, 255, 255, inArea(x, y) ? 1 : 0]);
         else if (args.comp_id === IDS.key) {
           pic = png((x, y) => {
-            const p = platePx(x, y, t, !!opts.grey);
-            return key.enabled ? [...p, keyAlpha(x, y, t, key)] : [...p, 1];
+            const p = platePx(x, y, t, !!opts.grey, !!opts.markers);
+            return key.enabled ? [...p, keyAlpha(x, y, t, key, !!opts.markers, !!ctc)] : [...p, 1];
           });
         } else {
           pic = png((x, y) => {
-            const p = platePx(x, y, t, !!opts.grey);
-            const a = keyAlpha(x, y, t, key);
+            const p = platePx(x, y, t, !!opts.grey, !!opts.markers);
+            const a = keyAlpha(x, y, t, key, !!opts.markers, !!ctc);
             return [0, 1, 2].map((c) => a * p[c] + (1 - a) * NEW[c]);
           });
         }
@@ -277,6 +293,27 @@ describe("ae_screen_foreground (the tool, against a fake bridge)", () => {
     expect(out.check.edge.length).toBeGreaterThan(0);
     expect(fs.existsSync(out.sheet_path)).toBe(true);
     expect(out.measured_on.length).toBe(4);
+  });
+
+  it("finds blue tracking markers on the screen, changes them to the key colour before Keylight, and checks they are gone", async () => {
+    const { out, ae } = await run({}, fakeAe({ markers: true }));
+    expect(out.ok).toBe(true);
+    expect(out.key.markers).not.toBeNull();
+    expect(Math.abs(out.key.markers.hue_deg - 228)).toBeLessThan(8);
+    expect(out.key.markers.blobs).toBeGreaterThanOrEqual(2);
+    expect(out.key.markers.left_pct).toBe(0);
+    const set2 = ae.calls.filter((c) => c.fn === "screenfgApply")[1].args;
+    set2.markers.to.forEach((v: number, c: number) => expect(v).toBeCloseTo(out.key.screen_colour[c], 3));
+    expect(set2.markers.hue_tolerance).toBeGreaterThanOrEqual(0.04);
+    expect(set2.markers.hue_tolerance).toBeLessThanOrEqual(0.25);
+    // The markers were left out of the sure foreground, so Clip White is still read off the subject.
+    expect(out.key.clip_white).toBeCloseTo(86, 0);
+    for (const r of out.receipts) expect(r.matches).toBe(true);
+    expect(out.notes.join(" ")).toMatch(/Tracking markers on the screen/);
+    // Asked to leave them: no Change To Color, and they stay.
+    const off = await run({ markers: "off" }, fakeAe({ markers: true }));
+    expect(off.out.key.markers).toBeNull();
+    expect(off.ae.calls.filter((c) => c.fn === "screenfgApply")[1].args.markers).toBeNull();
   });
 
   it("re-tunes the parts an earlier call made instead of building them again", async () => {

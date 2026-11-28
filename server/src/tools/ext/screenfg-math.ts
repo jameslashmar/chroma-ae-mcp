@@ -186,19 +186,173 @@ export function screenColourInside(frames: Array<{ img: RgbaImage; inside: Uint8
   return { rgb, dom, excess, pixels: keepR.length, coverage };
 }
 
+/** Hue in degrees (0..360) and saturation (0..1, max - min over max) of an sRGB colour in 0..1. */
+export function hueSat(r: number, g: number, b: number): { hue: number; sat: number; val: number } {
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const d = mx - mn;
+  let h = 0;
+  if (d > 1e-6) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { hue: h, sat: mx > 1e-6 ? d / mx : 0, val: mx };
+}
+
+/** The shorter way round between two hues, degrees. */
+export function hueDist(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+export interface Markers {
+  /** The markers' colour, 0..1. */
+  rgb: Rgb;
+  /** Their hue, degrees, and how far round it their pixels spread (95th percentile), degrees. */
+  hue: number;
+  spread_deg: number;
+  /** Blobs of that colour found over the frames, and their pixels. */
+  blobs: number;
+  px: number;
+}
+
+/** Saturation and hue distance from the key that make a pixel a marker candidate. */
+const MARKER_MIN_SAT = 0.35;
+const MARKER_MIN_HUE_FROM_KEY = 60;
+/** Hue half-width round the markers' colour, degrees, taken as theirs. */
+const MARKER_HUE_HALF = 25;
+
+function keyHue(key: KeyColour): number {
+  return hueSat(key.rgb[0], key.rgb[1], key.rgb[2]).hue;
+}
+
+/** 4-connected blobs of a mask: each blob's pixel indexes. */
+function blobsOf(mask: Uint8Array, w: number, h: number): number[][] {
+  const seen = new Uint8Array(mask.length);
+  const out: number[][] = [];
+  const stack: number[] = [];
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i] || seen[i]) continue;
+    const blob: number[] = [];
+    stack.push(i);
+    seen[i] = 1;
+    while (stack.length) {
+      const j = stack.pop()!;
+      blob.push(j);
+      const x = j % w;
+      const y = (j - x) / w;
+      const near = [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < h - 1 ? j + w : -1];
+      for (const k of near) {
+        if (k >= 0 && mask[k] && !seen[k]) {
+          seen[k] = 1;
+          stack.push(k);
+        }
+      }
+    }
+    out.push(blob);
+  }
+  return out;
+}
+
+/**
+ * Tracking markers on the screen (tape, dots, crosses of one colour): inside the area, small blobs of one
+ * saturated colour that is not the key's. The saturated non-key pixels are split into blobs; only blobs between
+ * 12 px and 3% of the inside vote, by hue in 10-degree bins (a hand is one large blob and does not vote). The
+ * winning hue needs at least two such blobs on one frame, and most of that hue's pixels in them (one large patch
+ * of it is a shirt or a prop, not markers). Null when there are none. Markers that are not a colour (black or
+ * white tape) are not looked for.
+ */
+export function findMarkers(frames: Array<{ img: RgbaImage; inside: Uint8Array }>, key: KeyColour): Markers | null {
+  const kh = keyHue(key);
+  const perFrame: Array<{ img: RgbaImage; hue: Float32Array; cand: Uint8Array; small: number[][] }> = [];
+  const bins = new Array<number>(36).fill(0);
+  for (const { img, inside } of frames) {
+    const { width: w, height: h, data: d } = img;
+    const hue = new Float32Array(w * h);
+    const cand = new Uint8Array(w * h);
+    let area = 0;
+    for (let i = 0; i < w * h; i++) {
+      if (!inside[i]) continue;
+      area++;
+      const c = hueSat(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255);
+      hue[i] = c.hue;
+      if (c.sat >= MARKER_MIN_SAT && c.val >= 0.15 && hueDist(c.hue, kh) >= MARKER_MIN_HUE_FROM_KEY) cand[i] = 1;
+    }
+    const small = blobsOf(cand, w, h).filter((b) => b.length >= 12 && b.length <= 0.03 * area);
+    for (const b of small) for (const j of b) bins[Math.floor(hue[j] / 10) % 36]++;
+    perFrame.push({ img, hue, cand, small });
+  }
+  let mode = 0;
+  for (let b = 1; b < 36; b++) if (bins[b] > bins[mode]) mode = b;
+  if (bins[mode] === 0) return null;
+  const centre = mode * 10 + 5;
+  let blobs = 0;
+  let kept = 0;
+  let all = 0;
+  let multi = false;
+  const rs: number[] = [];
+  const gs: number[] = [];
+  const bs: number[] = [];
+  const hs: number[] = [];
+  for (const f of perFrame) {
+    const d = f.img.data;
+    for (let i = 0; i < f.cand.length; i++) if (f.cand[i] && hueDist(f.hue[i], centre) <= MARKER_HUE_HALF) all++;
+    let inFrame = 0;
+    for (const blob of f.small) {
+      const own = blob.filter((j) => hueDist(f.hue[j], centre) <= MARKER_HUE_HALF);
+      if (own.length < 0.6 * blob.length) continue;
+      inFrame++;
+      kept += own.length;
+      for (const j of own) {
+        rs.push(d[j * 4] / 255);
+        gs.push(d[j * 4 + 1] / 255);
+        bs.push(d[j * 4 + 2] / 255);
+        hs.push(f.hue[j]);
+      }
+    }
+    blobs += inFrame;
+    if (inFrame >= 2) multi = true;
+  }
+  if (!multi || kept < 0.7 * all) return null;
+  const med = (v: number[]) => quantile(sortedOf(v), 0.5);
+  const rgb: Rgb = [med(rs), med(gs), med(bs)];
+  const hue = hueSat(rgb[0], rgb[1], rgb[2]).hue;
+  const spread = quantile(sortedOf(hs.map((x) => hueDist(x, hue))), 0.95);
+  return { rgb, hue: round2(hue), spread_deg: round2(spread), blobs, px: kept };
+}
+
+/** 1 where a pixel is the markers' colour (within their spread and 8 degrees, saturated), else 0. */
+export function markerMask(img: RgbaImage, inside: Uint8Array, mk: Markers): Uint8Array {
+  const n = img.width * img.height;
+  const m = new Uint8Array(n);
+  const d = img.data;
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    const c = hueSat(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255);
+    if (c.sat >= 0.25 && hueDist(c.hue, mk.hue) <= mk.spread_deg + 8) m[i] = 1;
+  }
+  return m;
+}
+
 /**
  * Sure screen and sure foreground inside the area, from the plate alone (so the clips are
  * judged against something Keylight did not make): screen where the excess is at least 0.6
  * of the screen's own, foreground where it is at most 0.15 of it (skin, sleeves, a pen; a
  * shadow on the screen sits between and is neither). Both eroded, so no edge pixel counts.
  */
-export function classify(img: RgbaImage, inside: Uint8Array, key: KeyColour, erodePx = 3): { screen: Uint8Array; fg: Uint8Array } {
+export function classify(img: RgbaImage, inside: Uint8Array, key: KeyColour, erodePx = 3, markers: Markers | null = null): { screen: Uint8Array; fg: Uint8Array } {
   const n = img.width * img.height;
   const s = new Uint8Array(n);
   const f = new Uint8Array(n);
   const d = img.data;
+  // Markers are on the screen, not in front of it: after their colour is changed to the key's they key out with it,
+  // so they (and a few px round them) count as neither.
+  const mk = markers ? dilate(markerMask(img, inside, markers), img.width, img.height, 2) : null;
   for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
+    if (!inside[i] || (mk && mk[i])) continue;
     const e = excessOf(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255, key.dom);
     if (e >= 0.6 * key.excess) s[i] = 1;
     else if (e <= 0.15 * key.excess) f[i] = 1;

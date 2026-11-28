@@ -15,7 +15,8 @@ A sourced survey (2026-11-28) of how professional trackers (Mocha, Nuke, SynthEy
 | Pattern size against sliding (4.1) | `ae_track_point` grows a pattern that changes in one direction only (`pattern_isotropy`). | Single Marker: 31 px slid 3.5 px, 41 px held 0.8 px. |
 | Tracking through occlusion, exclusion layers (4.6) | Occluders pushed out of the region fit; `region.exclude`; `holdout_layers`. | |
 | Judging quality (4.8) | Path check (jumps, off-path stretches), the surface's own points against the homography, `expected_error_px`, preview sheets. | docs/CALIBRATION.md |
-| Template update with drift correction, keyed bidirectional segments, coarse global search, lens undistortion, ESM (1.2, 1.4, 4.2, 2.10, ranked list) | Not built yet. | |
+| Several reference frames (1.2: Nuke's keyframes, Mocha's reference frames, Silhouette's merge) | `ae_track_join`: track each stretch with a reference of its own, then join them on their shared frames (refused when they disagree; the base should be the track whose reference shows the surface largest). The surface's own points are judged in each frame's px. | Painting board, close-up to wide: one reference lost the close-up; two, joined, 0.40-0.72 px against the markers over all 228 frames. |
+| Template update with drift correction, keyed bidirectional segments inside one call, coarse global search, lens undistortion, ESM (1.4, 4.2, 2.10, ranked list) | Not built yet. | |
 
 ---
 

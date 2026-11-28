@@ -48,12 +48,17 @@ import {
   clipsFrom,
   cornerSpeed,
   cropImage,
+  dilate,
   edgeBox,
   erode,
   fitWrap,
   keyQuality,
   maskFromAlpha,
   resizeMask,
+  findMarkers,
+  hueSat,
+  markerMask,
+  type Markers,
   swapCheck,
   screenColourInside,
   type ClipPlan,
@@ -93,6 +98,18 @@ export const AeScreenForegroundSchema = z.object({
     .union([z.enum(["auto", "off"]), z.number().min(0).max(1)])
     .default("auto")
     .describe("The edge: auto (default) fits how much the old screen bled into the subject's edge on the plate and swaps that much for the new screen; off: no wrap; a number 0..1 sets the strength."),
+  markers: z
+    .union([
+      z.enum(["auto", "off"]),
+      z.object({
+        colour: z.array(z.number().min(0).max(1)).length(3).describe("The markers' colour [r, g, b], 0..1."),
+        hue_tolerance_deg: z.number().min(2).max(45).default(15).describe("How far round its hue (degrees) still counts as the markers'. Default 15."),
+      }),
+    ])
+    .default("auto")
+    .describe(
+      "Tracking markers on the screen (tape, dots or crosses of one colour): auto (default) finds small blobs of one saturated colour that is not the key's inside the area and changes that colour to the key colour before Keylight (Change To Color), so they key out with the screen; off: leave them (they stay over the insert as part of the foreground); or give their colour. Markers that are not a colour (black or white tape) are not handled."
+    ),
   wrap_radius_px: z.number().min(1).max(40).optional().describe("Fast Box Blur radius of the wrap map (how deep into the edge it reaches), comp px. Default: fitted among 2, 3, 4 and 6 px per 1080 lines."),
   light_radius_px: z.number().min(0).max(200).optional().describe("Fast Box Blur radius of the screen light (the insert blurred), comp px. Default 8 per 1080 lines."),
   grow_px: z.number().min(0).max(100).optional().describe("How far the key's area reaches beyond the insert's own alpha (Minimax), comp px. Default 6 per 1080 lines."),
@@ -335,10 +352,12 @@ export function structureMismatches(read: FgRead, parts: Parts, grow: number): R
 }
 
 export interface SetPlan {
-  keylight?: { enabled?: boolean; colour?: number[]; clip_black?: number; clip_white?: number };
+  keylight?: { enabled?: boolean; colour?: number[]; clip_black?: number; clip_white?: number; despot_white?: number };
   wrap?: { opacity?: number; colour?: number[]; map_radius?: number; light_radius?: number };
   grow_px?: number;
   insert_mb?: { angle: number; phase: number } | null;
+  /** Change To Color before Keylight (the markers to the key colour); null removes it. */
+  markers?: { from: number[]; to: number[]; hue_tolerance: number; softness: number } | null;
 }
 
 export function setMismatches(read: FgRead, plan: SetPlan): ReceiptMismatch[] {
@@ -351,6 +370,7 @@ export function setMismatches(read: FgRead, plan: SetPlan): ReceiptMismatch[] {
     if (kl.colour) expectThat(m, nearColour(paramOf(key, "Keylight 906", "Keylight 906-0004"), kl.colour), "keylight.colour", kl.colour, paramOf(key, "Keylight 906", "Keylight 906-0004"), "Keylight's Screen Colour did not stick");
     if (kl.clip_black !== undefined) expectThat(m, near(paramOf(key, "Keylight 906", "Keylight 906-0012"), kl.clip_black, 0.01), "keylight.clip_black", kl.clip_black, paramOf(key, "Keylight 906", "Keylight 906-0012"), "Clip Black did not stick");
     if (kl.clip_white !== undefined) expectThat(m, near(paramOf(key, "Keylight 906", "Keylight 906-0013"), kl.clip_white, 0.01), "keylight.clip_white", kl.clip_white, paramOf(key, "Keylight 906", "Keylight 906-0013"), "Clip White did not stick");
+    if (kl.despot_white !== undefined) expectThat(m, near(paramOf(key, "Keylight 906", "Keylight 906-0018"), kl.despot_white, 0.01), "keylight.despot_white", kl.despot_white, paramOf(key, "Keylight 906", "Keylight 906-0018"), "Screen Despot White did not stick");
   }
   const w = plan.wrap;
   if (w) {
@@ -366,6 +386,16 @@ export function setMismatches(read: FgRead, plan: SetPlan): ReceiptMismatch[] {
     }
   }
   if (plan.grow_px !== undefined) expectThat(m, near(paramOf(read.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), plan.grow_px), "area.grow_px", plan.grow_px, paramOf(read.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), "The AREA's Minimax radius did not stick");
+  if (plan.markers) {
+    const fx = key?.effects ?? [];
+    const iC = fx.findIndex((e) => e.match === "ADBE Change To Color");
+    const iK = fx.findIndex((e) => e.match === "Keylight 906");
+    expectThat(m, iC >= 0 && iK >= 0 && iC < iK, "markers.order", "Change To Color before Keylight", fx.map((e) => e.match), "Change To Color is missing, or not before Keylight, in the KEY comp");
+    expectThat(m, nearColour(paramOf(key, "ADBE Change To Color", "ADBE Change To Color-0001"), plan.markers.from), "markers.from", plan.markers.from, paramOf(key, "ADBE Change To Color", "ADBE Change To Color-0001"), "Change To Color's From did not stick");
+    expectThat(m, nearColour(paramOf(key, "ADBE Change To Color", "ADBE Change To Color-0002"), plan.markers.to), "markers.to", plan.markers.to, paramOf(key, "ADBE Change To Color", "ADBE Change To Color-0002"), "Change To Color's To did not stick");
+  } else if (plan.markers === null) {
+    expectThat(m, !(key?.effects ?? []).some((e) => e.match === "ADBE Change To Color"), "markers.removed", "no Change To Color", "present", "Change To Color is still in the KEY comp");
+  }
   if (plan.insert_mb) {
     const ins = read.layers.insert;
     expectThat(m, near(paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0005"), plan.insert_mb.phase, 0.01), "insert.force_mb.phase", plan.insert_mb.phase, paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0005"), "The insert's CC Force Motion Blur phase did not stick");
@@ -594,10 +624,30 @@ async function screenForeground(ctx: ToolContext, args: AeScreenForegroundArgs):
       }
     }
 
+    // ----- tracking markers on the screen: their colour changed to the key's before Keylight -----
+    let markers: Markers | null = null;
+    if (typeof args.markers === "object") {
+      const c = args.markers.colour;
+      markers = { rgb: [c[0], c[1], c[2]], hue: hueSat(c[0], c[1], c[2]).hue, spread_deg: args.markers.hue_tolerance_deg, blobs: 0, px: 0 };
+    } else if (args.markers === "auto") {
+      markers = findMarkers(frames.map((f) => ({ img: f.plate, inside: f.inside })), key);
+    }
+    // Change To Color's Hue tolerance covers about +-tolerance x 180 degrees (measured on AE 27.0).
+    const markerPlan = markers ? { from: markers.rgb, to: key.rgb, hue_tolerance: r3(Math.min(0.25, Math.max(0.04, (markers.spread_deg + 8) / 180))), softness: 0.3 } : null;
+    if (markers) {
+      notes.push(
+        `Tracking markers on the screen${markers.blobs ? ` (${markers.blobs} blob(s) over the measured frames)` : ""}: their colour (hue ${r2(markers.hue)} degrees, within ${r2(markers.spread_deg)}) is changed to the key colour before Keylight, so they key out with the screen. Anything in front of the screen in that colour keys out too: pass markers "off", or their colour with a narrower hue_tolerance_deg.`
+      );
+    }
+
     // ----- write 2: Keylight on with the colour, clips open -----
     const clipsGiven = args.clip_black !== undefined && args.clip_white !== undefined;
     const plan2: SetPlan = {
-      keylight: { enabled: true, colour: key.rgb, clip_black: clipsGiven ? args.clip_black : 0, clip_white: clipsGiven ? args.clip_white : 100 },
+      // A marker's light rim (neither its colour nor the key's) stays as a 1-2 px outline after both: Screen Despot
+      // White takes such thin leftovers out (on the Painting board, 1.8% of a marker's crop opaque before, 0 after,
+      // the hand unchanged).
+      keylight: { enabled: true, colour: key.rgb, clip_black: clipsGiven ? args.clip_black : 0, clip_white: clipsGiven ? args.clip_white : 100, despot_white: markers ? Math.max(2, Math.round((3 * comp.height) / 1080)) : 0 },
+      markers: markerPlan,
     };
     const res2 = await runGuardedWrite(ctx, {
       toolName: TOOL,
@@ -622,7 +672,7 @@ async function screenForeground(ctx: ToolContext, args: AeScreenForegroundArgs):
       }
     });
     const used = frames.slice(0, raws.length);
-    const classes = used.map((f) => classify(f.plate, f.inside, key!));
+    const classes = used.map((f) => classify(f.plate, f.inside, key!, 3, markers));
     const clipPlan: ClipPlan = clipsFrom(used.map((f, i) => ({ alpha: raws[i], screen: classes[i].screen, fg: classes[i].fg })));
     let clipBlack = args.clip_black ?? clipPlan.black;
     let clipWhite = args.clip_white ?? clipPlan.white ?? DEFAULT_CLIP_WHITE;
@@ -706,6 +756,23 @@ async function screenForeground(ctx: ToolContext, args: AeScreenForegroundArgs):
     const same = (a: RgbaImage, b: RgbaImage) => a.width === b.width && a.height === b.height;
     const qFrames = finals.filter((f) => same(f.keyed, used[f.i].plate));
     const quality = qFrames.length ? keyQuality(qFrames.map((f) => ({ plate: used[f.i].plate, keyed: f.keyed, screen: classes[f.i].screen, fg: classes[f.i].fg }))) : null;
+    // The markers' own pixels (by colour on the plate) that the key still shows.
+    let markersLeft: number | null = null;
+    if (markers && qFrames.length) {
+      let n = 0;
+      let left = 0;
+      for (const f of qFrames) {
+        // The markers and a 2 px ring round them, where their light rim was.
+        const mm = dilate(markerMask(used[f.i].plate, used[f.i].inside, markers), used[f.i].plate.width, used[f.i].plate.height, 2);
+        for (let i = 0; i < mm.length; i++) {
+          if (!mm[i]) continue;
+          n++;
+          if (f.keyed.data[i * 4 + 3] > 127) left++;
+        }
+      }
+      markersLeft = n ? r2((left / n) * 100) : null;
+      if (markersLeft !== null && markersLeft > 5) notes.push(`${markersLeft}% of the markers' pixels still show over the insert: give their colour with a wider hue_tolerance_deg.`);
+    }
     const s = used[0].plate.height / comp.height;
     const rRender = Math.max(1, Math.round(mapRadius * s));
     const rim = finals
@@ -756,6 +823,7 @@ async function screenForeground(ctx: ToolContext, args: AeScreenForegroundArgs):
         clip_white: clipWhite,
         measured: clipPlan,
         replace_method: "Source (the subject keeps the plate's colour where the clip made it solid)",
+        markers: markers ? { colour_8bit: markers.rgb.map((v) => Math.round(v * 255)), hue_deg: r2(markers.hue), spread_deg: r2(markers.spread_deg), blobs: markers.blobs, hue_tolerance: markerPlan?.hue_tolerance ?? null, left_pct: markersLeft } : null,
       },
       wrap: { strength: r4(strength), map_radius_px: mapRadius, light_radius_px: lightRadius, fit: wrapFit },
       insert_motion_blur: { set: mb.set, speed_px_per_frame: speed },

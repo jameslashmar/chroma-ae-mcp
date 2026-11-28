@@ -1648,6 +1648,27 @@ describe("ae_screen_replace", () => {
   const base = (id: string, extra: Record<string, unknown> = {}) => ({ comp_id: 1, track: { track_id: id }, corners: SCREEN, ref_time: 0, insert: { item_id: 55 }, expect: expectArg, max_samples: 4, ...extra });
   const run = (args: Record<string, unknown>, ae = fakeAe()) => tool("ae_screen_replace").handler(AeScreenReplaceSchema.parse(args), ae.ctx).then((out) => ({ out: out as Out, ae }));
 
+  it("adds no Levels on a green or blue key screen: its brightness is the key colour's, not a display's black", async () => {
+    storeTrack("trk_sr_key");
+    // The same scene with the screen a bright green key colour.
+    const green = () => {
+      const p = scene(W, H, SCREEN, { sigma: 0.7, outside: 36, inside: () => 180 });
+      for (let i = 0; i < p.data.length; i += 4) {
+        if (p.data[i] > 100) {
+          p.data[i] = 60;
+          p.data[i + 1] = 210;
+          p.data[i + 2] = 55;
+        }
+      }
+      return p;
+    };
+    const { out, ae } = await run(base("trk_sr_key"), fakeAe({ picture: green }));
+    expect(out.ok).toBe(true);
+    const wrote = ae.calls.find((c) => c.fn === "screenrepApply")!.args;
+    expect(wrote.look.levels).toBeUndefined();
+    expect(out.notes.join(" ")).toMatch(/key colour on the measured frames/);
+  });
+
   it("measures the plate, writes in one guarded call, reads back separately, and writes the before / after sheet", async () => {
     storeTrack("trk_sr_1");
     const { out, ae } = await run(base("trk_sr_1"));

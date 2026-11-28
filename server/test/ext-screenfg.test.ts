@@ -19,7 +19,11 @@ import {
   edgeBox,
   erode,
   excessOf,
+  findMarkers,
   fitWrap,
+  hueDist,
+  hueSat,
+  markerMask,
   keyQuality,
   maskFromAlpha,
   MIN_FG_PX,
@@ -111,6 +115,44 @@ describe("screenfg-math", () => {
     expect(at(fg, 25)).toBe(0);
     expect(at(fg, 31)).toBe(0);
     expect(at(screen, 19)).toBe(0);
+  });
+
+  it("finds tracking markers: small blobs of one colour that is not the key's, not a hand or a shirt", () => {
+    const w = 120;
+    const h = 90;
+    const BLUE: [number, number, number] = [0.2, 0.33, 0.9];
+    const sq = (x: number, y: number, x0: number, y0: number, s = 6) => x >= x0 && x < x0 + s && y >= y0 && y < y0 + s;
+    const markers = image(w, h, (x, y) => {
+      if (Math.hypot(x - 85, y - 60) < 16) return SKIN;
+      if (sq(x, y, 15, 15) || sq(x, y, 60, 20) || sq(x, y, 30, 65)) return BLUE;
+      return GREEN;
+    });
+    const k = keyOf(GREEN);
+    const mk = findMarkers([{ img: markers, inside: ones(w, h) }], k)!;
+    expect(mk).not.toBeNull();
+    expect(hueDist(mk.hue, hueSat(...BLUE).hue)).toBeLessThan(3);
+    expect(mk.blobs).toBe(3);
+    expect(mk.spread_deg).toBeLessThan(3);
+    // The marker pixels are left out of the sure foreground, the hand is not.
+    const plain = classify(markers, ones(w, h), k, 1);
+    const withMk = classify(markers, ones(w, h), k, 1, mk);
+    expect(plain.fg[17 * w + 17]).toBe(1);
+    expect(withMk.fg[17 * w + 17]).toBe(0);
+    expect(withMk.fg[60 * w + 85]).toBe(1);
+    expect(markerMask(markers, ones(w, h), mk)[17 * w + 17]).toBe(1);
+    expect(markerMask(markers, ones(w, h), mk)[60 * w + 85]).toBe(0);
+    // One large blue patch is a shirt, not markers; a lone marker is not enough either; nothing saturated: none.
+    const shirt = image(w, h, (x, y) => (x > 70 && y > 30 ? BLUE : sq(x, y, 15, 15) ? BLUE : GREEN));
+    expect(findMarkers([{ img: shirt, inside: ones(w, h) }], k)).toBeNull();
+    const lone = image(w, h, (x, y) => (sq(x, y, 15, 15) ? BLUE : GREEN));
+    expect(findMarkers([{ img: lone, inside: ones(w, h) }], k)).toBeNull();
+    expect(findMarkers([{ img: image(w, h, () => GREEN), inside: ones(w, h) }], k)).toBeNull();
+    // Hue helpers.
+    expect(hueSat(1, 0, 0).hue).toBe(0);
+    expect(hueSat(0, 1, 0).hue).toBe(120);
+    expect(hueSat(0, 0, 1).hue).toBe(240);
+    expect(hueSat(0.5, 0.5, 0.5).sat).toBe(0);
+    expect(hueDist(350, 10)).toBe(20);
   });
 
   it("puts Clip Black over the screen's raw matte and Clip White under the subject's", () => {
@@ -400,6 +442,7 @@ function makeEffect(matchName: string, fail: Set<string>): FakeGroup {
     "ADBE Minimax": [P1("Operation", "ADBE Minimax-0001", 2), P1("Radius", "ADBE Minimax-0002", 0), P1("Channel", "ADBE Minimax-0003", 1)],
     "ADBE Fill": [PC("Color", "ADBE Fill-0002", [1, 0, 0, 1])],
     "CC Force Motion Blur": [P1("Override", "CC Force Motion Blur-0002", 1), P1("Shutter Angle", "CC Force Motion Blur-0003", 180), P1("Shutter Phase", "CC Force Motion Blur-0005", 0)],
+    "ADBE Change To Color": [PC("From", "ADBE Change To Color-0001", [1, 0, 0, 1]), PC("To", "ADBE Change To Color-0002", [0, 0, 1, 1]), P1("Change", "ADBE Change To Color-0003", 1), P1("Change By", "ADBE Change To Color-0004", 1), P1("Hue", "ADBE Change To Color-0005", 0.1), P1("Softness", "ADBE Change To Color-0008", 0.5)],
     "CC Power Pin": [P2("Top Left", "CC Power Pin-0002", [0, 0]), P2("Top Right", "CC Power Pin-0003", [100, 0]), P2("Bottom Left", "CC Power Pin-0004", [0, 100]), P2("Bottom Right", "CC Power Pin-0005", [100, 100])],
     "ADBE Pro Levels2": [P1("Input Black", "l1", 0)],
   };
@@ -416,6 +459,10 @@ function withEffects(layer: FakeLayer, fail: Set<string>, existing: string[] = [
     fx.props.push(g);
     Object.defineProperty(g, "propertyIndex", { get: () => fx.props.indexOf(g) + 1 });
     g.remove = () => fx.props.splice(fx.props.indexOf(g), 1);
+    g.moveTo = (i: number) => {
+      fx.props.splice(fx.props.indexOf(g), 1);
+      fx.props.splice(i - 1, 0, g);
+    };
     return g;
   };
   fx.addProperty = add;
@@ -564,6 +611,17 @@ describe("screenfg.jsx", () => {
     expect(res.set).toEqual(expect.arrayContaining(["keylight.colour", "keylight.clip_white", "wrap.opacity", "wrap.map_radius", "grow_px"]));
     const read = A.screenfgRead({ comp_id: s.comp.id, layer_ids: Object.fromEntries(Object.entries(r.layers).map(([k, v]: any) => [k, v.id])), comps: parts.comps });
     expect(setMismatches(read, { ...plan, wrap: { ...plan.wrap, opacity: 97 } })).toEqual([]);
+    // Markers: Change To Color goes in before Keylight, and a set with markers null takes it out again.
+    const mk = { from: [0.2, 0.33, 0.9], to: [0.38, 0.71, 0.22], hue_tolerance: 0.1, softness: 0.3 };
+    A.screenfgApply({ comp_id: s.comp.id, mode: "set", parts, markers: mk, expect: GUARD });
+    const keyInner = (s.project.itemByID(r.comps.key.id) as FakeComp).layer(1)!;
+    expect(fxList(keyInner)).toEqual(["ADBE Change To Color", "Keylight 906"]);
+    expect(pv(keyInner, "ADBE Change To Color", "ADBE Change To Color-0003")).toBe(3);
+    expect(pv(keyInner, "ADBE Change To Color", "ADBE Change To Color-0005")).toBe(0.1);
+    const readMk = A.screenfgRead({ comp_id: s.comp.id, layer_ids: Object.fromEntries(Object.entries(r.layers).map(([k2, v]: any) => [k2, v.id])), comps: parts.comps });
+    expect(setMismatches(readMk, { markers: mk })).toEqual([]);
+    A.screenfgApply({ comp_id: s.comp.id, mode: "set", parts, markers: null, expect: GUARD });
+    expect(fxList(keyInner)).toEqual(["Keylight 906"]);
     // A part that went missing is refused before anything is written.
     s.comp.layer("Phone WRAP")!.remove();
     expect(() => A.screenfgApply({ comp_id: s.comp.id, mode: "set", parts, ...plan, expect: GUARD })).toThrow(/wrap layer/);

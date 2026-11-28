@@ -1473,6 +1473,8 @@ interface ReplaceInfo {
 interface PlateMeasure {
   frames_measured: number;
   frames_planned: number;
+  /** Frames whose screen is one green or blue key colour (sampleKey): its brightness is not a display's black. */
+  key_frames?: number;
   black: number | null;
   white: number | null;
   p95: number | null;
@@ -1739,6 +1741,7 @@ async function measureLook(
   const p02s: number[] = [];
   const p98s: number[] = [];
   const p95s: number[] = [];
+  let keyFrames = 0;
   let edgeDone = false;
   const refNearest = p.times.reduce((b, t) => (Math.abs(t - p.refTime) < Math.abs(b - p.refTime) ? t : b), p.times[0]);
   for (let i = 0; i < p.times.length; i++) {
@@ -1779,6 +1782,7 @@ async function measureLook(
       p02s.push(stats.values[0]);
       p95s.push(stats.values[2]);
       p98s.push(stats.values[3]);
+      if (sampleKey(snap.image, (quad as Vec2[]).map((q) => [q[0] * scale - 0.5, q[1] * scale - 0.5] as Vec2))) keyFrames++;
       out.per_frame.push({ time: r4(t), p02: r4(stats.values[0]), p50: r4(stats.values[1]), p98: r4(stats.values[3]), visible_share: r3(Math.min(1, share)) });
       if (!edgeDone && t === refNearest) {
         edgeDone = true;
@@ -1790,6 +1794,7 @@ async function measureLook(
     }
   }
   out.frames_measured = p02s.length;
+  out.key_frames = keyFrames;
   if (p02s.length > 0) {
     out.black = median(p02s);
     out.white = median(p98s);
@@ -1977,8 +1982,18 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
   let blurSigma: number | null = null;
   let blurSigmaLayer: number | null = null;
   let reflections: { threshold: number; opacity: number } | null = null;
+  // A green or blue screen's brightness is its key colour's, not a display's black: matched, it lifted a poster's
+  // blacks to half grey on HCW's green Painting board (measured "black" 0.576). Its edge softness still counts.
+  const keyScreen = !!measure && measure.frames_measured > 0 && (measure.key_frames ?? 0) >= Math.ceil(measure.frames_measured / 2);
+  if (args.match_look && keyScreen) {
+    notes.push(
+      "The screen is a green or blue key colour on the measured frames, so its brightness says nothing about a display's black: no Levels were added (the insert keeps its full range). Key whatever crosses the screen with ae_screen_foreground; match the insert's colour to the scene by eye or with ae_patch_color_match."
+    );
+  }
   if (args.match_look) {
-    if (measure && measure.black !== null && measure.white !== null) {
+    if (keyScreen) {
+      // No Levels: see the note above.
+    } else if (measure && measure.black !== null && measure.white !== null) {
       levels = planLevels({
         plateBlack: measure.black,
         plateWhite: measure.white,

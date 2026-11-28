@@ -40,6 +40,8 @@
   var KL_COLOUR = "Keylight 906-0004";
   var KL_CLIP_BLACK = "Keylight 906-0012";
   var KL_CLIP_WHITE = "Keylight 906-0013";
+  // Screen Despot White: small opaque leftovers inside the screen (a tracking marker's light rim) taken out.
+  var KL_DESPOT_WHITE = "Keylight 906-0018";
   var KL_REPLACE = "Keylight 906-0019";
   var SHIFT = "ADBE Shift Channels";
   var INVERT = "ADBE Invert";
@@ -47,6 +49,9 @@
   var MINIMAX = "ADBE Minimax";
   var FILL = "ADBE Fill";
   var FORCE_MB = "CC Force Motion Blur";
+  // Change To Color, before Keylight: tracking markers on the screen turned to the key colour so they key out with it.
+  // Its Hue tolerance covers about +-tolerance x 180 degrees (measured on AE 27.0: 0.1 changed hues 10 degrees off, not 20).
+  var CTC = "ADBE Change To Color";
   var PIN_MATCHES = ["CC Power Pin", "ADBE Corner Pin"];
   // Shift Channels' menu: 1 Alpha ... 9 Full On (measured on AE 27.0).
   var SHIFT_ALPHA = 1;
@@ -693,6 +698,7 @@
       if (k.colour !== undefined) checkColour(k.colour, "keylight.colour");
       if (k.clip_black !== undefined) checkNumber(k.clip_black, 0, 100, "keylight.clip_black");
       if (k.clip_white !== undefined) checkNumber(k.clip_white, 0, 100, "keylight.clip_white");
+      if (k.despot_white !== undefined) checkNumber(k.despot_white, 0, 50, "keylight.despot_white");
     }
     if (wr) {
       if (wr.opacity !== undefined) checkNumber(wr.opacity, 0, 100, "wrap.opacity");
@@ -701,6 +707,13 @@
       if (wr.light_radius !== undefined) checkNumber(wr.light_radius, 0, 500, "wrap.light_radius");
     }
     if (a.grow_px !== undefined) checkNumber(a.grow_px, 0, 200, "grow_px");
+    var mk = a.markers;
+    if (mk) {
+      checkColour(mk.from, "markers.from");
+      checkColour(mk.to, "markers.to");
+      checkNumber(mk.hue_tolerance, 0, 2, "markers.hue_tolerance");
+      checkNumber(mk.softness, 0, 1, "markers.softness");
+    }
     if (a.insert_mb) {
       checkNumber(a.insert_mb.angle, 0, 720, "insert_mb.angle");
       checkNumber(a.insert_mb.phase, -360, 360, "insert_mb.phase");
@@ -723,6 +736,10 @@
         if (k.clip_white !== undefined) {
           setParam(inner, KEYLIGHT, KL_CLIP_WHITE, k.clip_white);
           done.push("keylight.clip_white");
+        }
+        if (k.despot_white !== undefined) {
+          setParam(inner, KEYLIGHT, KL_DESPOT_WHITE, k.despot_white);
+          done.push("keylight.despot_white");
         }
         if (k.enabled !== undefined) {
           lastEffect(inner, KEYLIGHT).enabled = k.enabled === true;
@@ -752,6 +769,23 @@
       if (a.grow_px !== undefined) {
         setParam(parts.area_inner, MINIMAX, "ADBE Minimax-0002", a.grow_px);
         done.push("grow_px");
+      }
+      if (mk === null) {
+        if (removeEffects(parts.key_inner, CTC) > 0) done.push("markers.removed");
+      } else if (mk) {
+        var ki = parts.key_inner;
+        if (!lastEffect(ki, CTC)) {
+          addEffect(ki, CTC);
+          // Before Keylight: the markers must be the key colour when Keylight sees them.
+          lastEffect(ki, CTC).moveTo(1);
+        }
+        setParam(ki, CTC, "ADBE Change To Color-0001", [mk.from[0], mk.from[1], mk.from[2]]);
+        setParam(ki, CTC, "ADBE Change To Color-0002", [mk.to[0], mk.to[1], mk.to[2]]);
+        setParam(ki, CTC, "ADBE Change To Color-0003", 3);
+        setParam(ki, CTC, "ADBE Change To Color-0004", 1);
+        setParam(ki, CTC, "ADBE Change To Color-0005", mk.hue_tolerance);
+        setParam(ki, CTC, "ADBE Change To Color-0008", mk.softness);
+        done.push("markers");
       }
       if (a.insert_mb) mbOut = setForceMb(parts.insert, a.insert_mb);
       return { set: done, insert_mb: mbOut };
@@ -816,13 +850,14 @@
   // ---------- read-back ----------
 
   var READ_PARAMS = {};
-  READ_PARAMS[KEYLIGHT] = [KL_VIEW, KL_COLOUR, KL_CLIP_BLACK, KL_CLIP_WHITE, KL_REPLACE];
+  READ_PARAMS[KEYLIGHT] = [KL_VIEW, KL_COLOUR, KL_CLIP_BLACK, KL_CLIP_WHITE, KL_REPLACE, KL_DESPOT_WHITE];
   READ_PARAMS[SHIFT] = ["ADBE Shift Channels-0001", "ADBE Shift Channels-0002", "ADBE Shift Channels-0003", "ADBE Shift Channels-0004"];
   READ_PARAMS[INVERT] = ["ADBE Invert-0001"];
   READ_PARAMS[BOX] = ["ADBE Box Blur2-0001", "ADBE Box Blur2-0002", "ADBE Box Blur2-0004"];
   READ_PARAMS[MINIMAX] = ["ADBE Minimax-0001", "ADBE Minimax-0002", "ADBE Minimax-0003"];
   READ_PARAMS[FILL] = ["ADBE Fill-0002"];
   READ_PARAMS[FORCE_MB] = ["CC Force Motion Blur-0002", "CC Force Motion Blur-0003", "CC Force Motion Blur-0005"];
+  READ_PARAMS[CTC] = ["ADBE Change To Color-0001", "ADBE Change To Color-0002", "ADBE Change To Color-0003", "ADBE Change To Color-0005", "ADBE Change To Color-0008"];
 
   function describe(l) {
     if (!l) return null;

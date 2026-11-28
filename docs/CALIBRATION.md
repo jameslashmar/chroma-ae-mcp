@@ -310,3 +310,44 @@ The two pieces of `docs/TRACKING-RESEARCH.md` built first, each measured against
 
   It costs about 60% more time a frame, and it lifts noise in flat areas, so it stays off by default.
 
+## Several reference frames: the surface check in the frame's px, and joining tracks (2026-11-28)
+
+Hollywood Camera Work's Painting plate starts as a close-up of a green board with blue tape markers (the corners out of the frame) and pulls back to a wide shot where the board is 3-4 times smaller. The board was region-tracked with one reference frame in the wide shot. Backwards from it, frames 25-93 correlated 0.76-0.81 with the reference (0.85 needed), and the track was lost at frame 25. The same board tracked with a reference in the close-up (frame 30) wrote frames 0-64, refused most of 74-119 on the surface's own points, and flagged 65-72 on the path check.
+
+- **The surface check measured in the wrong px.** It compares each point's patch in the frame warped back onto the reference, so its shift is in reference px. On a close-up reference, a frame where the board shows 3 times smaller turns 1 frame px into 3 reference px, and the 1.5 px limit refused right frames. On a wide reference tracked into a close-up, the reverse let wrong ones through. Each shift is now carried into the frame through the track's local scale there (the Jacobian at the point), and the limit is in frame px. The close-up track then wrote all 121 frames, and against the blue markers (found by colour, independent of the tracker) it sat at a median 0.40 px on frames 0-64, 0.62 on 65-93 and 0.72 on 94-120.
+- **The same clips, the check in frame px** (region tracks, offline):
+
+  | Clip | Frames written: before → now |
+  |---|---|
+  | U-Haul | 189 → 189 |
+  | Matchmove Test Wide | 20 → 20 |
+  | Matchmove Test Close | 8 → 8 |
+  | Picture Frame | 193 → 193 |
+  | Window | 101 → 100 (132 refused) |
+  | Markers on Sticks | 93 → 90 (73, 111, 112 refused) |
+  | Embassy | 145 → 133 (136-154 refused) |
+
+  No frame that was refused before is written now. Embassy's camera moves in: the points' median shift grows from 0.4 px (frame 100) to 1.2 (130), 1.5-1.7 (136-154) and 3.5 (158), at 1.1 to 1.34 times the reference's scale. These frames had read 1.2-1.3 reference px, under the limit; this is the drift an overlay found earlier at the foot of the region.
+- **`ae_track_join`** joined the two tracks on their 26 shared frames. They put the corners a median 0.77 px apart (1.78 worst), and the path check of the joined corners flagged nothing. Against the markers:
+
+  | Frames | Base: the wide track | Base: the close-up track |
+  |---|---|---|
+  | 0-64 | 2.27 px | 0.40 px |
+  | 65-93 | 1.38 px | 0.62 px |
+  | 94-120 | 0.65 px | 0.72 px |
+  | 121-227 | 0.28 px | 0.64 px |
+
+  The relation between the two references is measured where both solved, where the board is small. Its error grows with the board's size on the frames that take it, so the track whose reference shows the surface largest must be the base. The tool reports the expected carry (`join.carried`: 0.66 px against 1.99 swapped) and says when swapping would be better.
+
+## Tracking markers on a green screen; the painting board finished (2026-11-28)
+
+Hollywood Camera Work's Painting board is green with blue tape diamonds on it. Keylight keys the green and keeps the blue, so the first composite showed the diamonds over the new picture.
+
+- **`ae_screen_foreground` `markers` (auto).** It looks inside the insert's area for small blobs of one saturated colour that is not the key's. A hand is one large blob and does not count; one large patch of a colour is a shirt, not markers. On the board's 8 measured frames it found 48 blobs, hue 225 degrees with a spread of 11.7. That colour is changed to the key colour before Keylight (Change To Color; its Hue tolerance covers about tolerance x 180 degrees, measured on AE 27.0: 0.1 changed hues 10 degrees off and not 20). The markers' pixels are kept out of the sure foreground, or Clip White would be read off them.
+- **Their rim.** The tape's edge is a lighter cyan, neither the tape's colour nor the key's. It stayed as a 1-2 px outline round every diamond: 1.8% of a marker's crop opaque. Keylight's Screen Despot White at 3 px (at 1080 lines), set when markers are found, took it to 0, and the hand's opaque area went from 71.3% to 71.0% of its crop. The check counts the markers and a 2 px ring round them: 0.02% still showed.
+- **The insert's black.** `ae_screen_replace` matches Levels to the screen's measured black. The green board's 2nd percentile luma (0.576) is the paint's, not a display's black, and the poster's blacks went to half grey. On a screen that is a key colour on most measured frames, no Levels are added now.
+- **The board, finished.**
+  - The poster was pinned with the joined track (above) over all 228 frames, close-up to wide.
+  - The hand, arm and towel were kept in front: Clip Black 31.8, Clip White 84.3, 0.3% of the subject see-through, its colour shifted 0.1 levels.
+  - The edge was swapped at strength 0.62: 116-124% of the old screen's share, a little more than measured.
+  - The easel's clamp and the board's white foam edge, which are in front of the green face, stay in front.

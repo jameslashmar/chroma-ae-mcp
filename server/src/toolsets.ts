@@ -106,7 +106,7 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
   tracking_patching: {
     blurb: "Tracking, stabilizing, object removal (clean plates, inpaint), patches, screen replacement.",
     tools: [
-      "ae_track_point", "ae_track_multi", "ae_track_read", "ae_track_apply", "ae_patch_check",
+      "ae_track_point", "ae_track_multi", "ae_track_read", "ae_track_apply", "ae_track_join", "ae_patch_check",
       "ae_patch_color_match", "ae_patch_grain", "ae_patch_finish", "ae_region_stats", "ae_stabilize",
       "ae_stabilize_roundtrip", "ae_cleanplate_pick", "ae_cleanplate_setup", "ae_inpaint_plate",
       "ae_mask_follow", "ae_garbage_matte", "ae_caf_prep", "ae_screen_corners", "ae_screen_replace", "ae_screen_foreground",
@@ -193,6 +193,7 @@ export const SEARCH_HINTS: Record<string, string> = {
   ae_render_queue_add: "render export queue output",
   ae_screen_replace: "replace phone tv monitor screen content corner pin",
   ae_screen_foreground: "hand finger in front of screen keep over insert green screen key light wrap spill",
+  ae_track_join: "join merge two tracks reference frames keyframes close-up to wide zoom dolly scale change multiple references",
   ae_track_point: "track follow motion tracker point attach reverse backward tracking forward-backward check flicker shadow light normalise",
   ae_track_multi: "planar track mocha surface plane corner pin reverse backward tracking track backwards from a clean frame forward-backward look-alike high-pass pre-process flicker moving shadow local contrast normalise",
   ae_stabilize: "stabilize shaky camera smooth",

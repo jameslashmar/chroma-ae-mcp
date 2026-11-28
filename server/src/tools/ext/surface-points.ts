@@ -20,7 +20,7 @@
  * to 7, all of them, and only when every match is strong. Fewer than 4: no verdict. Pure: no AE, no files.
  */
 
-import { goodFeatures, mulH, ransacModel, translationH, applyH, type Mat3, type Vec2 } from "./planar-math.js";
+import { goodFeatures, jacobianAt, mulH, ransacModel, translationH, applyH, type Mat3, type Vec2 } from "./planar-math.js";
 import { patternIsotropy, MIN_PATTERN_ISOTROPY, type GrayImage } from "./track.js";
 
 export interface SurfacePointsCheck {
@@ -28,8 +28,16 @@ export interface SurfacePointsCheck {
   matched: number;
   /** Points the verdict was read from (the plane's own). */
   used: number;
-  /** Their median distance from where the track puts them, reference image px. */
+  /**
+   * Their median distance from where the track puts them, in the FRAME's image px: each shift is measured in the
+   * reference (the frame warped back) and carried into the frame through the track's local scale there, so the
+   * limit means the same on a zoom or a dolly as on a level move. The board of Hollywood Camera Work's Painting
+   * plate, tracked from a close-up reference into a wide shot 3-4 times smaller, was refused on frames whose
+   * shifts were a few reference px and about 1 px in the frame.
+   */
   px: number;
+  /** The same median in reference image px (what the frame warped back shows). */
+  ref_px: number;
 }
 
 /** Fewer distinct points than this on the surface: no check. */
@@ -221,6 +229,12 @@ export class SurfacePoints {
     } else if (!shifts.every((s) => s.score >= FEW_MIN_SCORE)) {
       return null;
     }
-    return { matched: shifts.length, used: use.length, px: median(use.map((s) => Math.hypot(s.dx, s.dy))) };
+    // A shift in the reference at point p is J(p) times it in the frame (J: the track's local linear part there).
+    const inFrame = use.map((s) => {
+      const j = jacobianAt(H, this.points[s.k]);
+      if (!j) return Math.hypot(s.dx, s.dy);
+      return Math.hypot(j[0] * s.dx + j[1] * s.dy, j[2] * s.dx + j[3] * s.dy);
+    });
+    return { matched: shifts.length, used: use.length, px: median(inFrame), ref_px: median(use.map((s) => Math.hypot(s.dx, s.dy))) };
   }
 }

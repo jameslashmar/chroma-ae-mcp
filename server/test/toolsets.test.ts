@@ -597,7 +597,7 @@ describe("ae_search_tools", () => {
     // A family is found by its actions' old names, and says which actions it has.
     const p = (await search({ pattern: "^ae_track_" })).body;
     expect(p.matches.map((m: any) => m.name)).toEqual(["ae_track"]);
-    expect(p.matches[0].actions).toEqual(["point (ae_track_point)", "multi (ae_track_multi)", "read (ae_track_read)", "apply (ae_track_apply)"]);
+    expect(p.matches[0].actions).toEqual(["point (ae_track_point)", "multi (ae_track_multi)", "read (ae_track_read)", "apply (ae_track_apply)", "join (ae_track_join)"]);
     const both = (await search({ group: "render", query: "template" })).body;
     expect(both.matches.every((m: any) => groupOf(m.name) === "render")).toBe(true);
     expect(both.matches[0].name).toBe("ae_render_templates");

@@ -254,16 +254,19 @@ export class PointTracker {
 
   /**
    * The pattern at (x, y) in `frame`, tracked back into the frame the point was last measured on the way the
-   * forward step went (searched round the match less the velocity the forward step predicted with, as far): the
-   * distance from where the point was. A match on a look-alike tracks back onto the look-alike's own place.
+   * forward step went (searched round the match less the velocity the forward step predicted with): the distance
+   * from where the point was. A match on a look-alike tracks back onto the look-alike's own place. The search
+   * reaches as far as the forward match landed from its prediction, plus 4 px (at most the search radius): a right
+   * match near its prediction costs a small search, a jump to a look-alike a wider one.
    */
-  private backward(frame: GrayImage, x: number, y: number, vx: number, vy: number): number | null {
+  private backward(frame: GrayImage, x: number, y: number, vx: number, vy: number, missPx: number): number | null {
     if (!this.lastFrame || this.lastFrame === frame) return null;
     const patch = extractPatch(frame, x, y, this.opts.patchSize);
     if (!patch) return null;
     const t = makeTemplate(patch);
     if (t.std < MIN_PATTERN_STD) return null;
-    const back = matchTemplate(this.lastFrame, t, x - vx, y - vy, this.opts.searchRadius);
+    const reach = Math.min(this.opts.searchRadius, Math.ceil(missPx) + 4);
+    const back = matchTemplate(this.lastFrame, t, x - vx, y - vy, reach);
     if (!back) return null;
     return Math.hypot(back.x - this.last.x, back.y - this.last.y);
   }
@@ -293,7 +296,7 @@ export class PointTracker {
     if (!pick || pick.score < this.opts.minConfidence) return null;
     let fb: number | undefined;
     if (this.opts.fbMaxPx && this.opts.fbMaxPx > 0) {
-      const d = this.backward(frame, pick.x, pick.y, px - this.last.x, py - this.last.y);
+      const d = this.backward(frame, pick.x, pick.y, px - this.last.x, py - this.last.y, Math.hypot(pick.x - px, pick.y - py));
       if (d !== null) {
         fb = d;
         this.lastFb = d;
