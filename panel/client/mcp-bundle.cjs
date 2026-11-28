@@ -704,9 +704,9 @@ function mergeValues(a, b) {
       return { valid: false };
     }
     const newArray = [];
-    for (let index = 0; index < a.length; index++) {
-      const itemA = a[index];
-      const itemB = b[index];
+    for (let index2 = 0; index2 < a.length; index2++) {
+      const itemA = a[index2];
+      const itemB = b[index2];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return { valid: false };
@@ -2653,10 +2653,10 @@ var init_types = __esm({
       //   }) as any;
       //   return merged;
       // }
-      catchall(index) {
+      catchall(index2) {
         return new _ZodObject({
           ...this._def,
-          catchall: index
+          catchall: index2
         });
       }
       pick(mask) {
@@ -3144,10 +3144,10 @@ var init_types = __esm({
         }
         const keyType = this._def.keyType;
         const valueType = this._def.valueType;
-        const pairs2 = [...ctx.data.entries()].map(([key, value], index) => {
+        const pairs2 = [...ctx.data.entries()].map(([key, value], index2) => {
           return {
-            key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
-            value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
+            key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index2, "key"])),
+            value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index2, "value"]))
           };
         });
         if (ctx.common.async) {
@@ -5931,9 +5931,9 @@ var init_common = __esm({
 });
 
 // src/es3-lint.ts
-function lineAt(source, index) {
+function lineAt(source, index2) {
   let line = 1;
-  for (let i = 0; i < index && i < source.length; i++) {
+  for (let i = 0; i < index2 && i < source.length; i++) {
     if (source.charCodeAt(i) === 10) line++;
   }
   return line;
@@ -6149,9 +6149,9 @@ var init_es3_lint = __esm({
 });
 
 // src/jsx-safety-lint.ts
-function lineAt2(source, index) {
+function lineAt2(source, index2) {
   let line = 1;
-  for (let i = 0; i < index && i < source.length; i++) {
+  for (let i = 0; i < index2 && i < source.length; i++) {
     if (source.charCodeAt(i) === 10) line++;
   }
   return line;
@@ -6194,10 +6194,10 @@ function lintJsxSafety(code, opts) {
   const aligned = stripped.length === code.length;
   const taken = [];
   const seen = /* @__PURE__ */ new Set();
-  const push2 = (index, length, member, message, use, severity2) => {
-    const line = lineAt2(stripped, index);
+  const push2 = (index2, length, member, message, use, severity2) => {
+    const line = lineAt2(stripped, index2);
     const key = `${line}|${member}|${severity2}`;
-    taken.push([index, index + length]);
+    taken.push([index2, index2 + length]);
     if (seen.has(key)) return;
     seen.add(key);
     findings.push({ line, member, message, use_instead: use, severity: severity2 });
@@ -6233,14 +6233,14 @@ function lintJsxSafety(code, opts) {
     write: "writes a file",
     writeln: "writes a file"
   };
-  const reportFile = (idx, matched, method) => {
+  const reportFile = (idx2, matched, method) => {
     if (method === "open") {
-      const problem = aligned ? modeProblem(code, idx + matched.length) : "the mode cannot be checked";
+      const problem = aligned ? modeProblem(code, idx2 + matched.length) : "the mode cannot be checked";
       if (problem === null) return;
-      push2(idx, matched.length, "File.open", `${problem}; tools write their own files`, NONE, "refuse");
+      push2(idx2, matched.length, "File.open", `${problem}; tools write their own files`, NONE, "refuse");
       return;
     }
-    push2(idx, matched.length, `File.${method}`, `${fileMsg[method] ?? "changes a file"}; tools write their own files and nothing outside the allowed locations`, NONE, "refuse");
+    push2(idx2, matched.length, `File.${method}`, `${fileMsg[method] ?? "changes a file"}; tools write their own files and nothing outside the allowed locations`, NONE, "refuse");
   };
   const fileNames = fileVariables(stripped);
   if (fileNames.length > 0) {
@@ -8881,8 +8881,8 @@ function getDefaultAerenderRegistry() {
   }
   return defaultRegistry;
 }
-function rqStatusRefusal(index, status) {
-  const head3 = `Render Queue item ${index} is ${(status ?? "unknown").toUpperCase()}`;
+function rqStatusRefusal(index2, status) {
+  const head3 = `Render Queue item ${index2} is ${(status ?? "unknown").toUpperCase()}`;
   switch (status) {
     case "unqueued":
       return `${head3}: its Render checkbox is off, so aerender would skip it. Queue it with ae_render_queue_edit (queued: true), save with ae_save, then start again.`;
@@ -15459,11 +15459,11 @@ var require_png = __commonJS({
       if (src.gamma) {
         for (let y = 0; y < src.height; y++) {
           for (let x = 0; x < src.width; x++) {
-            let idx = src.width * y + x << 2;
+            let idx2 = src.width * y + x << 2;
             for (let i = 0; i < 3; i++) {
-              let sample = src.data[idx + i] / 255;
+              let sample = src.data[idx2 + i] / 255;
               sample = Math.pow(sample, 1 / 2.2 / src.gamma);
-              src.data[idx + i] = Math.round(sample * 255);
+              src.data[idx2 + i] = Math.round(sample * 255);
             }
           }
         }
@@ -15692,10 +15692,10 @@ function analysePaintedDialog(lines, png, size) {
     if (rings.length === 1) {
       const ring = rings[0];
       const hits = [];
-      buttons.forEach((b, idx) => {
+      buttons.forEach((b, idx2) => {
         const cx = b.x + b.w / 2;
         const cy = b.y + b.h / 2;
-        if (cx >= ring.x1 && cx <= ring.x2 && cy >= ring.y1 && cy <= ring.y2) hits.push(idx);
+        if (cx >= ring.x1 && cx <= ring.x2 && cy >= ring.y1 && cy <= ring.y2) hits.push(idx2);
       });
       if (hits.length === 1) {
         defaultIndex = hits[0];
@@ -15755,9 +15755,9 @@ function noteOpStarted(opId) {
 }
 function noteOpFinished(opId) {
   if (!opId || typeof opId !== "string") return;
-  const idx = inFlightOps.indexOf(opId);
-  if (idx !== -1) {
-    inFlightOps.splice(idx, 1);
+  const idx2 = inFlightOps.indexOf(opId);
+  if (idx2 !== -1) {
+    inFlightOps.splice(idx2, 1);
   }
 }
 function getCurrentInFlightOp() {
@@ -16302,8 +16302,8 @@ async function describeBlockingDialogs() {
 }
 function decidePaintedKey(buttons, want) {
   const wantL = psLabel(want);
-  const idx = buttons.findIndex((b) => psLabel(b.name) === wantL);
-  if (idx === -1) {
+  const idx2 = buttons.findIndex((b) => psLabel(b.name) === wantL);
+  if (idx2 === -1) {
     const names = buttons.map((b) => b.name);
     return {
       action: "refuse",
@@ -16311,7 +16311,7 @@ function decidePaintedKey(buttons, want) {
       message: `"${want}" was NOT pressed: no button with that label was found on the dialog (read: ${names.length > 0 ? names.map((n) => `"${n}"`).join(", ") : "none"}). AE painted this dialog itself: ask the user to answer it.`
     };
   }
-  const found = buttons[idx];
+  const found = buttons[idx2];
   if (CANCEL_LIKE.test(wantL)) {
     if (wantL !== "cancel" && buttons.some((b) => psLabel(b.name) === "cancel")) {
       return {
@@ -16324,7 +16324,7 @@ function decidePaintedKey(buttons, want) {
   }
   let defaultIdx = buttons.findIndex((b) => b.default === true);
   if (defaultIdx === -1 && buttons.length === 1 && buttons[0].default === void 0) defaultIdx = 0;
-  if (defaultIdx === idx) {
+  if (defaultIdx === idx2) {
     if (OK_LIKE.test(wantL)) return { action: "enter", pressed: found.name };
     return {
       action: "refuse",
@@ -19891,12 +19891,12 @@ function buildCaptions(segments, opts = {}) {
   const violations = findViolations(caps, S);
   for (const c of caps) {
     if (c.speaker !== void 0) {
-      let idx = speakerIds.indexOf(c.speaker);
-      if (idx < 0) idx = speakerIds.push(c.speaker) - 1;
-      c.speaker_index = idx;
+      let idx2 = speakerIds.indexOf(c.speaker);
+      if (idx2 < 0) idx2 = speakerIds.push(c.speaker) - 1;
+      c.speaker_index = idx2;
       if (speakerStyle === "color") {
         const palette = opts.speaker_colors && opts.speaker_colors.length ? opts.speaker_colors : SPEAKER_COLORS;
-        c.color = palette[idx % palette.length];
+        c.color = palette[idx2 % palette.length];
       }
     }
     let floor = c.start;
@@ -22508,7 +22508,7 @@ function createTranscribeTools(options = {}) {
       next: `ae_captions_plan with transcript: { path: ${JSON.stringify(written)}, offset: ${job.offset}${job.window ? `, from_s: ${job.window.from_s}, to_s: ${job.window.to_s}` : ""} }`
     };
   }
-  async function respond(job, waitS) {
+  async function respond2(job, waitS) {
     if (job.state !== "done" && job.state !== "failed") {
       let timer;
       await Promise.race([job.done, new Promise((r) => timer = setTimeout(r, waitS * 1e3))]);
@@ -22540,7 +22540,7 @@ function createTranscribeTools(options = {}) {
         if (args.job_id !== void 0) {
           const job2 = jobs.get(args.job_id);
           if (!job2) return fail("unknown_job", `No transcription job ${args.job_id} (jobs live in memory until the server restarts)`);
-          return respond(job2, wait);
+          return respond2(job2, wait);
         }
         const engineId = args.engine ?? "elevenlabs";
         if (!engines[engineId]) return fail("bad_path", `Unknown engine ${engineId}`);
@@ -22565,7 +22565,7 @@ function createTranscribeTools(options = {}) {
             { ...base, offset: 0, stem: fileStem(path23.basename(file, path23.extname(file))), defaultDir: folder ?? path23.dirname(file), outPath: args.out_path, source: "file" },
             (j) => upload(j, file, args)
           );
-          return respond(job2, wait);
+          return respond2(job2, wait);
         }
         const info = (await ctx.bridge.callHost("audioCompInfo", { comp_id: args.comp_id }, { label: "ae_transcribe (comp)", mutates: false, toolName: "ae_transcribe" })).result;
         if (!info.audio_layers.length) return fail("no_audio", `"${info.name}" has no layer with audio switched on.`);
@@ -22575,7 +22575,7 @@ function createTranscribeTools(options = {}) {
           if (shortcut.job) {
             const sj = shortcut.job;
             const j = newJob(sj.init, (jj) => upload(jj, sj.file, args));
-            return respond(j, wait);
+            return respond2(j, wait);
           }
           skipped = shortcut.reasons;
         }
@@ -22624,7 +22624,7 @@ function createTranscribeTools(options = {}) {
             return upload(j, file, args);
           }
         );
-        return respond(job, wait);
+        return respond2(job, wait);
       }
     }
   ];
@@ -25247,11 +25247,11 @@ function planRamp(args, info, cfd) {
     const picks = Math.min(times.length, MAX_PLAN_SAMPLES);
     const seen = /* @__PURE__ */ new Set();
     for (let n = 0; n < picks; n++) {
-      const idx = picks === 1 ? 0 : Math.round(n * (times.length - 1) / (picks - 1));
-      if (seen.has(idx)) continue;
-      seen.add(idx);
-      plan2.sample_times.push(times[idx]);
-      plan2.expected_samples.push({ time: times[idx], value: plan2.per_frame.values[idx] });
+      const idx2 = picks === 1 ? 0 : Math.round(n * (times.length - 1) / (picks - 1));
+      if (seen.has(idx2)) continue;
+      seen.add(idx2);
+      plan2.sample_times.push(times[idx2]);
+      plan2.expected_samples.push({ time: times[idx2], value: plan2.per_frame.values[idx2] });
     }
     plan2.notes.push(`${times.length} linear keys, one per frame.`);
   }
@@ -26026,14 +26026,14 @@ function expandItems(job, reads, now, queueReads = []) {
     const info = byName.get(comp);
     const f = framesFor(info && info.count === 1 ? info : void 0, job.time_span);
     for (const spec of job.specs) {
-      const index = items.length + 1;
+      const index2 = items.length + 1;
       items.push({
-        index,
+        index: index2,
         comp_name: comp,
         spec_name: spec.name,
         ...spec.render_settings_template ? { render_settings_template: spec.render_settings_template } : {},
         ...spec.output_module_template ? { output_module_template: spec.output_module_template } : {},
-        output_path: joinOutput(job.output_dir, outputNameFor(job, comp, spec, index, now)),
+        output_path: joinOutput(job.output_dir, outputNameFor(job, comp, spec, index2, now)),
         ...f.start !== void 0 ? { start_frame: f.start } : {},
         ...f.end !== void 0 ? { end_frame: f.end } : {},
         frames: f.frames
@@ -27616,7 +27616,7 @@ var init_rqedit = __esm({
     init_common();
     init_write_runner();
     queueOf = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
-    itemOf2 = (q, index) => q?.items.find((i) => i.index === index);
+    itemOf2 = (q, index2) => q?.items.find((i) => i.index === index2);
     H264 = (mbps) => [
       { pattern: `^H\\.264.*Match Render Settings.*\\b${mbps} ?Mbps`, flags: "i" },
       { pattern: "^H\\.264.*Match Render Settings", flags: "i" },
@@ -27948,9 +27948,9 @@ var init_rqedit = __esm({
     });
     asArray = (v) => Array.isArray(v) ? v : [];
     afterCopiesRead = (entries2) => {
-      const idx = asArray(entries2).map((e) => e.item_index).filter((n) => typeof n === "number");
-      if (!idx.length) return readCall2(void 0, false);
-      return { host: "rqeditRead", args: { item_indexes: void 0, settings: false, settings_indexes: [...new Set(idx)] } };
+      const idx2 = asArray(entries2).map((e) => e.item_index).filter((n) => typeof n === "number");
+      if (!idx2.length) return readCall2(void 0, false);
+      return { host: "rqeditRead", args: { item_indexes: void 0, settings: false, settings_indexes: [...new Set(idx2)] } };
     };
     editHostArgs = (a) => ({
       item_index: a.item_index,
@@ -29895,7 +29895,7 @@ var init_rqfollow = __esm({
     MAX_FOLLOW_MODULES = 8;
     followDeps = { answerTimeoutMs: 6e3, now: () => Date.now() };
     FINISHED_STATUSES = /* @__PURE__ */ new Set(["done", "user_stopped", "err_stopped"]);
-    itemKey = (index, compName) => `${index}|${compName ?? ""}`;
+    itemKey = (index2, compName) => `${index2}|${compName ?? ""}`;
     followState = { lastSeen: /* @__PURE__ */ new Map(), lastRead: null, followed: /* @__PURE__ */ new Set() };
   }
 });
@@ -31364,7 +31364,7 @@ function tagText(n, name) {
   const clean = name.toUpperCase().replace(/[^A-Z0-9 _.:/#-]/g, "?");
   return `${n} ${clean.length > MAX_TAG_NAME ? clean.slice(0, MAX_TAG_NAME - 1) + "." : clean}`;
 }
-function drawAnnotations(base, view, comp, index, opts) {
+function drawAnnotations(base, view, comp, index2, opts) {
   const scale = textScaleFor(view);
   const thick = Math.max(1, Math.round(Math.max(view.outW, view.outH) / 800));
   if (opts.safeAreas) {
@@ -31376,7 +31376,7 @@ function drawAnnotations(base, view, comp, index, opts) {
   }
   const { x0, y0, x1, y1 } = view.region;
   const placed = [];
-  for (const e of index) {
+  for (const e of index2) {
     if (!e.box) continue;
     const [bx0, by0, bx1, by1] = e.box.bbox;
     if (bx1 <= x0 || by1 <= y0 || bx0 >= x1 || by0 >= y1) continue;
@@ -31530,7 +31530,7 @@ var init_annotate = __esm({
       [255, 255, 64, 255],
       [255, 128, 64, 255]
     ];
-    colorFor = (index) => LAYER_COLORS[Math.abs(index) % LAYER_COLORS.length];
+    colorFor = (index2) => LAYER_COLORS[Math.abs(index2) % LAYER_COLORS.length];
     hex = (c) => "#" + c.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("");
     MAX_ZOOM = 8;
     WHITE = [255, 255, 255, 255];
@@ -31608,10 +31608,10 @@ var init_annotate = __esm({
             const img = decodePngFile(shot.path);
             const view = makeView(comp, img, args.zoom, budget);
             const picked = chooseLayers(shot.read.layers, args.layers, args.layer_ids);
-            const index = buildIndex(shot.read, picked, args.include_3d);
+            const index2 = buildIndex(shot.read, picked, args.include_3d);
             const missing = missingLayerIds(shot.read, picked, args.layers, args.layer_ids);
             const base = renderBase(img, view, args.checkerboard);
-            drawAnnotations(base, view, comp, index, draw);
+            drawAnnotations(base, view, comp, index2, draw);
             images.push(base);
             if (args.grid !== void 0) gridSpacing = effectiveGridSpacing(args.grid, view);
             viewInfo = {
@@ -31622,7 +31622,7 @@ var init_annotate = __esm({
             };
             const notes2 = [];
             if (picked.length === 0) notes2.push(`No layers matched \`layers: ${args.layers}\`${args.layer_ids ? " and layer_ids" : ""}.`);
-            if (index.some((e) => e.three_d && e.box)) {
+            if (index2.some((e) => e.three_d && e.box)) {
               const cam = cameraModel(shot.read, layerMap(shot.read.layers));
               if (cam.source === "layer") notes2.push(`3D layers use camera "${cam.name}".`);
               else if (!cam.note) notes2.push("3D layers use AE's default comp camera.");
@@ -31634,12 +31634,12 @@ var init_annotate = __esm({
               ...pair ? { label: i === 0 ? "A" : "B" } : {},
               time: shot.read.time,
               full_path: shot.path,
-              layers: index,
-              layer_count: index.length,
+              layers: index2,
+              layer_count: index2.length,
               total_layers: shot.read.total_layers,
               truncated: shot.read.truncated,
               ...missing.length > 0 ? { missing_layer_ids: missing } : {},
-              drawn_count: index.filter((e) => e.drawn).length,
+              drawn_count: index2.filter((e) => e.drawn).length,
               ...args.stats ? { stats: gridStats(img, view, args.stats_cols, args.stats_rows) } : {},
               ...notes2.length > 0 ? { notes: notes2 } : {}
             });
@@ -34137,15 +34137,15 @@ var init_motion = __esm({
           );
           const tiles = [];
           const frames = [];
-          shots.forEach((shot, index) => {
+          shots.forEach((shot, index2) => {
             const full = decodePngFile(shot.path);
-            const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
+            const analysis = analyzeDecodedFrame(full, { index: index2, path: shot.path, time: shot.time });
             tiles.push({
               image: resizeArea(full, layout.tileWidth, layout.tileHeight),
               label: showLabels ? frameLabel(shot) : void 0,
               flagged: analysis.flags.length > 0
             });
-            frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
+            frames.push({ index: index2, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
           });
           const sheet = buildContactSheet(tiles, layout);
           const sheetPath = path33.join(
@@ -34470,7 +34470,7 @@ function overshootFromSamples(seg) {
   for (let i = 1; i <= n; i++) times.push(seg.start + (seg.end - seg.start) * i / (n + 1));
   times.push(seg.end);
   const values = [seg.from, ...seg.samples, seg.to];
-  const key = (index, time, value) => ({ index, time, value, in_interp: "bezier", out_interp: seg.hold ? "hold" : "bezier" });
+  const key = (index2, time, value) => ({ index: index2, time, value, in_interp: "bezier", out_interp: seg.hold ? "hold" : "bezier" });
   const s = { times, values, keys: [key(1, seg.start, seg.from), key(2, seg.end, seg.to)] };
   try {
     return analyzeMotion(s, sampleSpeeds(s)).overshoot.length > 0;
@@ -35248,9 +35248,9 @@ function describeRanges(nums) {
   }
   return parts.join(", ");
 }
-function measureFrame(png, index = 0) {
+function measureFrame(png, index2 = 0) {
   const { width: w, height: h, data } = png;
-  const analysis = analyzeDecodedFrame(png, { index, path: "" });
+  const analysis = analyzeDecodedFrame(png, { index: index2, path: "" });
   let kind = null;
   if (analysis.is_transparent) kind = "transparent";
   else if (analysis.is_black) kind = "black";
@@ -40276,8 +40276,8 @@ async function channelPeak(x, poly, integerFormat = true) {
           const taps = phases[p];
           let acc = 0;
           for (let j = 0; j < taps.length; j++) {
-            const idx = n + half - j;
-            if (idx >= 0 && idx < x.length) acc += taps[j] * x[idx];
+            const idx2 = n + half - j;
+            if (idx2 >= 0 && idx2 < x.length) acc += taps[j] * x[idx2];
           }
           const v = Math.abs(acc);
           if (v > best) best = v;
@@ -41746,13 +41746,13 @@ function testableLayers(read3) {
   return { tested: all.slice(0, MAX_TEST_LAYERS), overflow: all.slice(MAX_TEST_LAYERS) };
 }
 async function matchedPair(p) {
-  const { ctx, opId, compId, copyId, time, index, framesDir, toolName } = p;
-  let a = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index * 4, framesDir, toolName });
-  let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: index * 4 + 1, framesDir, toolName });
+  const { ctx, opId, compId, copyId, time, index: index2, framesDir, toolName } = p;
+  let a = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index2 * 4, framesDir, toolName });
+  let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: index2 * 4 + 1, framesDir, toolName });
   if (a.time !== b.time) {
     const later = Math.max(a.time, b.time);
-    if (a.time < later) a = await captureCompFrame({ ctx, opId, compId, time: later, frameIndex: index * 4 + 2, framesDir, toolName });
-    else b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: index * 4 + 3, framesDir, toolName });
+    if (a.time < later) a = await captureCompFrame({ ctx, opId, compId, time: later, frameIndex: index2 * 4 + 2, framesDir, toolName });
+    else b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: index2 * 4 + 3, framesDir, toolName });
     if (a.time !== b.time) throw new Error(`the original and the copy rendered at different times (${a.time}s and ${b.time}s)`);
   }
   return { original: a.path, copy: b.path, time: a.time };
@@ -42574,11 +42574,11 @@ async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
   const opId = ctx.bridge.newOpId();
   const tool = "ae_timing_check";
   let blocked = false;
-  let idx = 0;
+  let idx2 = 0;
   await runQueued5(ctx, `${tool}(${compId})`, opId, async () => {
     if (wantFirst) {
       try {
-        const snap = await captureCompFrame({ ctx, opId, compId, time: range[0], frameIndex: idx++, framesDir, toolName: tool });
+        const snap = await captureCompFrame({ ctx, opId, compId, time: range[0], frameIndex: idx2++, framesDir, toolName: tool });
         const a = analyzeDecodedFrame(decodePngFile(snap.path), { index: 0, path: snap.path, time: snap.time });
         stage.first_frame = { time_s: r36(range[0]), path: snap.path, flags: a.flags, mean_rgba: a.mean_rgba };
         const f = firstFrameFinding(a, range[0], fps);
@@ -42595,7 +42595,7 @@ async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
       const times = [0.1, 0.5, 0.9].map((u) => Math.min(Math.max(s.start_s + span * u, s.start_s + frame), s.end_s - frame));
       try {
         const paths = [];
-        for (const t of times) paths.push((await captureCompFrame({ ctx, opId, compId, time: t, frameIndex: idx++, framesDir, toolName: tool })).path);
+        for (const t of times) paths.push((await captureCompFrame({ ctx, opId, compId, time: t, frameIndex: idx2++, framesDir, toolName: tool })).path);
         const pngs = paths.map(decodePngFile);
         let worst = 0;
         let identical = true;
@@ -43142,9 +43142,9 @@ async function renderVariants(ctx, setId, original, copies, times, tileSize) {
       out.variants.push(rendered);
       if (!list2.length) continue;
       const layout = sheetLayout(list2.length, original.width, original.height, tileSize, list2.length, true);
-      const tiles = list2.map((shot, index) => {
+      const tiles = list2.map((shot, index2) => {
         const full = decodePngFile(shot.path);
-        const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
+        const analysis = analyzeDecodedFrame(full, { index: index2, path: shot.path, time: shot.time });
         rendered.frames.push({ time: shot.time, path: shot.path, flags: analysis.flags });
         return { image: resizeArea(full, layout.tileWidth, layout.tileHeight), label: `${upper(c.variant_id)} ${shot.time.toFixed(2)}s`, flagged: analysis.flags.length > 0 };
       });
@@ -45438,8 +45438,8 @@ function ransacModel(model, from, to, opts) {
     if (count === n) break;
   }
   if (!best || best.count < m) return null;
-  const idx = best.inliers.map((v, i) => v ? i : -1).filter((i) => i >= 0);
-  const fit = solveModel(model, idx.map((i) => from[i]), idx.map((i) => to[i]));
+  const idx2 = best.inliers.map((v, i) => v ? i : -1).filter((i) => i >= 0);
+  const fit = solveModel(model, idx2.map((i) => from[i]), idx2.map((i) => to[i]));
   if (!fit) return null;
   const err = reprojectionErrors(fit.H, from, to);
   if (!err) return null;
@@ -46592,10 +46592,10 @@ function lensCheck(track) {
     let sq = 0;
     let n = 0;
     for (const f of frames) {
-      const idx = f.points.map((p, i) => p ? i : -1).filter((i) => i >= 0);
-      if (idx.length < 6) continue;
-      const from = idx.map((i) => undistort(track.ref_points[i], k2));
-      const to = idx.map((i) => undistort(f.points[i], k2));
+      const idx2 = f.points.map((p, i) => p ? i : -1).filter((i) => i >= 0);
+      if (idx2.length < 6) continue;
+      const from = idx2.map((i) => undistort(track.ref_points[i], k2));
+      const to = idx2.map((i) => undistort(f.points[i], k2));
       const fit = ransacModel(model, from, to, { thresholdPx: 3, iterations: 40, seed: 1 });
       if (!fit) continue;
       const inl = fit.inliers.filter(Boolean).length;
@@ -46962,16 +46962,16 @@ function expectedFor(kind, layerId, role, times, values, extra2 = {}) {
 }
 function keyMismatches(expected, written, after) {
   const m = [];
-  const idOf = (e) => e.layerId ?? written.nulls.find((n) => n.name === e.nullName)?.layer_id;
+  const idOf2 = (e) => e.layerId ?? written.nulls.find((n) => n.name === e.nullName)?.layer_id;
   const tag = (e) => `${e.nullName ?? e.layerId}.${e.role}`;
   for (const e of expected) {
-    const id = idOf(e);
+    const id = idOf2(e);
     const got = [...written.written.filter((w) => w.layer_id === id).flatMap((w) => w.props), ...written.nulls.filter((n) => n.layer_id === id).flatMap((n) => n.props)].find((p) => p.role === e.role);
     expectThat(m, got !== void 0 && got.numKeys === e.keys, `${tag(e)}.numKeys`, e.keys, got?.numKeys, "Key count differs from the frames written");
   }
   if (!after) return m;
   for (const e of expected) {
-    const id = idOf(e);
+    const id = idOf2(e);
     const prop = after.items.filter((it) => it.layer_id === id).flatMap((it) => it.props).find((p) => p.role === e.role);
     if (!prop) {
       m.push({ path: tag(e), expected: "read back", actual: void 0, message: "The written property was not found in the read-back" });
@@ -47262,8 +47262,8 @@ async function trackMulti(ctx, args) {
     let rebuildRenders = 0;
     let mustAdvance = false;
     const chunk = async (renderCompId) => {
-      const snap = async (time, index, charge = true) => {
-        const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: index, framesDir, toolName });
+      const snap = async (time, index2, charge = true) => {
+        const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: index2, framesDir, toolName });
         if (charge) budget.spend();
         else rebuildRenders++;
         try {
@@ -47757,14 +47757,14 @@ var init_planar = __esm({
         const tpl = makeWarpedTemplate(this.refGray, this.imgRef[i][0], this.imgRef[i][1], this.patchImg, [j[0], j[1], 0, j[2], j[3], 0]);
         return tpl && tpl.std >= 3 ? tpl : void 0;
       }
-      solve(idx, pos) {
+      solve(idx2, pos) {
         const model = this.opts.model;
         const m = MODEL_MIN_POINTS[model];
-        const from = idx.map((i) => this.refPoints[i]);
-        const to = idx.map((i) => pos[i]);
-        if (idx.length >= m + 2) return ransacModel(model, from, to, { thresholdPx: this.opts.ransacPx, iterations: 60, seed: this.opts.seed });
+        const from = idx2.map((i) => this.refPoints[i]);
+        const to = idx2.map((i) => pos[i]);
+        if (idx2.length >= m + 2) return ransacModel(model, from, to, { thresholdPx: this.opts.ransacPx, iterations: 60, seed: this.opts.seed });
         const s = solveModel(model, from, to);
-        return s ? { H: s.H, inliers: idx.map(() => true), rms_px: s.rms_px } : null;
+        return s ? { H: s.H, inliers: idx2.map(() => true), rms_px: s.rms_px } : null;
       }
       step(gray, time) {
         const n = this.refPoints.length;
@@ -48636,7 +48636,7 @@ function cropToBounds(img, bounds, margin) {
 }
 function fitGainOffset(ref3, img, mask, opts) {
   const n = Math.min(ref3.width * ref3.height, img.width * img.height, mask.length);
-  const idx = [];
+  const idx2 = [];
   for (let k = 0; k < n; k++) {
     if (mask[k] < 0.5) continue;
     if (opts.excludeClipped) {
@@ -48648,11 +48648,11 @@ function fitGainOffset(ref3, img, mask, opts) {
       }
       if (clipped) continue;
     }
-    idx.push(k);
+    idx2.push(k);
   }
   const gain = [1, 1, 1];
   const offset = [0, 0, 0];
-  if (idx.length === 0) return { gain, offset, rms: 0, pixels: 0 };
+  if (idx2.length === 0) return { gain, offset, rms: 0, pixels: 0 };
   let sqErr = 0;
   let used = 0;
   for (let c = 0; c < 3; c++) {
@@ -48676,10 +48676,10 @@ function fitGainOffset(ref3, img, mask, opts) {
       return { g, o: (sy - g * sx) / m };
     };
     const resid = (k, f2) => f2.g * (img.data[k * 4 + c] / 255) + f2.o - ref3.data[k * 4 + c] / 255;
-    let f = fit(idx);
-    let keep = idx;
-    if (opts.trimPct > 0 && idx.length > 10) {
-      const order = idx.map((k) => ({ k, e: Math.abs(resid(k, f)) })).sort((a, b) => a.e - b.e);
+    let f = fit(idx2);
+    let keep = idx2;
+    if (opts.trimPct > 0 && idx2.length > 10) {
+      const order = idx2.map((k) => ({ k, e: Math.abs(resid(k, f)) })).sort((a, b) => a.e - b.e);
       keep = order.slice(0, Math.max(3, Math.ceil(order.length * (1 - opts.trimPct / 100)))).map((o) => o.k);
       f = fit(keep);
     }
@@ -48692,7 +48692,7 @@ function fitGainOffset(ref3, img, mask, opts) {
     }
     if (c === 2) used = Math.max(1, used);
   }
-  return { gain, offset, rms: Math.sqrt(sqErr / Math.max(1, used)), pixels: idx.length };
+  return { gain, offset, rms: Math.sqrt(sqErr / Math.max(1, used)), pixels: idx2.length };
 }
 function sampleBilinear(g, x, y) {
   if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return NaN;
@@ -48912,15 +48912,15 @@ function planSamples2(o) {
   const refF = refFrame ?? f0;
   let n = o.everyN ?? Math.max(1, Math.ceil(total2 / Math.max(2, o.maxSamples)));
   const asked = n;
-  const build = (step3) => {
+  const build2 = (step3) => {
     const set2 = /* @__PURE__ */ new Set([f0, f1, refF]);
     for (let f = f0; f <= f1; f += step3) set2.add(f);
     return [...set2].sort((a, b) => a - b);
   };
-  let frames = build(n);
+  let frames = build2(n);
   while (frames.length > o.maxSamples && n < total2) {
     n++;
-    frames = build(n);
+    frames = build2(n);
   }
   return { times: frames.map((f) => f / fps), total_frames: total2, every_n: n, ref_time: refF / fps, range, capped: n !== asked && o.everyN !== void 0 };
 }
@@ -49938,23 +49938,23 @@ async function runWithPlateCopy(ctx, spec) {
   });
 }
 async function matchedPair2(p) {
-  const { ctx, opId, compId, copyId, time, index, framesDir, toolName } = p;
+  const { ctx, opId, compId, copyId, time, index: index2, framesDir, toolName } = p;
   const spend = p.spend ?? (() => {
   });
-  let a = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index * 6, framesDir, toolName });
+  let a = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index2 * 6, framesDir, toolName });
   spend();
   if (a.time !== time) spend();
-  let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: index * 6 + 1, framesDir, toolName });
+  let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: index2 * 6 + 1, framesDir, toolName });
   spend();
   if (b.time !== time) spend();
   if (a.time !== b.time) {
     const later = Math.max(a.time, b.time);
     let redone;
     if (a.time < later) {
-      a = await captureCompFrame({ ctx, opId, compId, time: later, frameIndex: index * 6 + 2, framesDir, toolName });
+      a = await captureCompFrame({ ctx, opId, compId, time: later, frameIndex: index2 * 6 + 2, framesDir, toolName });
       redone = a;
     } else {
-      b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: index * 6 + 3, framesDir, toolName });
+      b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: index2 * 6 + 3, framesDir, toolName });
       redone = b;
     }
     spend();
@@ -51251,18 +51251,18 @@ var init_mattecheck = __esm({
             const end = Math.max(start, (args.end ?? Number(comp.workAreaStart) + Number(comp.workAreaDuration) - fd) - 2 * fd);
             const times = [];
             for (let i = 0; i < args.samples; i++) times.push(args.samples === 1 ? start : start + (end - start) * i / (args.samples - 1));
-            let show = null;
+            let show2 = null;
             let checkpoint = null;
             if (args.layer) {
               const planar = (await ctx.bridge.evalRaw({ id: `${opId}_layers`, script: buildJsxCall("planarComp", { comp_id: args.comp_id, layers: [args.layer, ...args.with_layers ?? []] }), label: `${label2} layers`, mutates: false, toolName })).result;
               const pick5 = (sel2) => planar.layers.find((l) => sel2.id !== void 0 ? l.id === sel2.id : sel2.index !== void 0 ? l.index === sel2.index : l.name === sel2.name);
               const wanted = [args.layer, ...args.with_layers ?? []].map(pick5);
               if (wanted.some((l) => !l)) return { ok: false, error: "not_found", message: "A layer in `layer` or `with_layers` was not found." };
-              show = wanted.map((l) => ({ index: l.index, id: l.id }));
+              show2 = wanted.map((l) => ({ index: l.index, id: l.id }));
               const guard = await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
               checkpoint = await autoCheckpoint(ctx, guard, toolName);
             }
-            const run = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers: show, expect: args.expect ?? { project_path: "" }, toolName }, async (renderId) => {
+            const run = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers: show2, expect: args.expect ?? { project_path: "" }, toolName }, async (renderId) => {
               const rows2 = [];
               let fi = 0;
               for (const t of times) {
@@ -51343,9 +51343,9 @@ async function hostRead(ctx, opId, tag, host, args, toolName, slow = false) {
 function paramTableAgrees(table, wanted) {
   if (!table) return true;
   const resolved = resolveEffectParams(table, wanted);
-  for (const [key, idx] of Object.entries(resolved)) {
+  for (const [key, idx2] of Object.entries(resolved)) {
     const roles = table.filter((r) => (r.role ?? "").split("+").includes(key)).map((r) => r.index);
-    if (idx === null ? roles.length > 0 : !roles.includes(idx)) return false;
+    if (idx2 === null ? roles.length > 0 : !roles.includes(idx2)) return false;
   }
   return true;
 }
@@ -51854,8 +51854,8 @@ function stabilizeMismatches(a, written, after) {
   }
   return m;
 }
-async function renderShot(ctx, opId, compId, time, index, framesDir, toolName) {
-  const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName });
+async function renderShot(ctx, opId, compId, time, index2, framesDir, toolName) {
+  const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index2, framesDir, toolName });
   try {
     const png = decodePngFile(s.path);
     return { time, gray: toGray(png), image: png };
@@ -52914,8 +52914,8 @@ function findSpatialSources(gray, scale, poly, o) {
   for (let i = 0; i < ring.length; i++) if (ring[i] > 0) pts.push(i);
   if (pts.length < 40) return [];
   const stride = Math.max(1, Math.ceil(pts.length / 1500));
-  const idx = pts.filter((_, i) => i % stride === 0);
-  const a = idx.map((i) => blurred.data[i]);
+  const idx2 = pts.filter((_, i) => i % stride === 0);
+  const a = idx2.map((i) => blurred.data[i]);
   const meanA = a.reduce((s, v) => s + v, 0) / a.length;
   const varA = a.reduce((s, v) => s + (v - meanA) * (v - meanA), 0);
   if (varA < 1e-6) return [];
@@ -52927,16 +52927,16 @@ function findSpatialSources(gray, scale, poly, o) {
   const cap2 = o.maxCandidates ?? 6e3;
   while (cands(step3) > cap2) step3++;
   const found = [];
-  const bvals = new Float32Array(idx.length);
+  const bvals = new Float32Array(idx2.length);
   for (let dy = -wy; dy <= wy; dy += step3) {
     for (let dx = -wx; dx <= wx; dx += step3) {
       if (Math.abs(dx) < bw + clr && Math.abs(dy) < bh + clr) continue;
       if (lb[0] + dx < 1 || lb[1] + dy < 1 || lb[2] + dx > cw - 2 || lb[3] + dy > ch - 2) continue;
       let ok = true;
       let sumB = 0;
-      for (let k = 0; k < idx.length; k++) {
-        const x = idx[k] % cw + dx;
-        const y = Math.floor(idx[k] / cw) + dy;
+      for (let k = 0; k < idx2.length; k++) {
+        const x = idx2[k] % cw + dx;
+        const y = Math.floor(idx2[k] / cw) + dy;
         if (x < 0 || y < 0 || x >= cw || y >= ch || hole[y * cw + x] > 0) {
           ok = false;
           break;
@@ -52945,10 +52945,10 @@ function findSpatialSources(gray, scale, poly, o) {
         sumB += bvals[k];
       }
       if (!ok) continue;
-      const meanB = sumB / idx.length;
+      const meanB = sumB / idx2.length;
       let cov = 0;
       let varB = 0;
-      for (let k = 0; k < idx.length; k++) {
+      for (let k = 0; k < idx2.length; k++) {
         cov += (a[k] - meanA) * (bvals[k] - meanB);
         varB += (bvals[k] - meanB) * (bvals[k] - meanB);
       }
@@ -53083,8 +53083,8 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
   let scale = 1;
   let renderError;
   let rendered = 0;
-  const snap = async (time, idx) => {
-    const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: idx, framesDir, toolName });
+  const snap = async (time, idx2) => {
+    const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: idx2, framesDir, toolName });
     budget.spend();
     try {
       return decodePngFile(s.path);
@@ -53166,9 +53166,9 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     await yieldLoop4();
   }
   if (based) {
-    const idx = raw.map((_, i) => i).filter((i) => centres[i] !== null);
-    idx.forEach((i, n) => {
-      const j = n > 0 ? idx[n - 1] : idx[n + 1];
+    const idx2 = raw.map((_, i) => i).filter((i) => centres[i] !== null);
+    idx2.forEach((i, n) => {
+      const j = n > 0 ? idx2[n - 1] : idx2[n + 1];
       if (j === void 0) return;
       const a = centres[i];
       const bC = centres[j];
@@ -54446,14 +54446,14 @@ function pushPull(plane, unknown) {
 async function laplaceFill(plane, unknown, opts = {}) {
   const out = { width: plane.width, height: plane.height, data: new Float32Array(plane.data) };
   const { width: w, height: h } = out;
-  const idx = [];
+  const idx2 = [];
   let minX = w;
   let minY = h;
   let maxX = -1;
   let maxY = -1;
   for (let i = 0; i < unknown.length; i++) {
     if (!unknown[i]) continue;
-    idx.push(i);
+    idx2.push(i);
     const x = i % w;
     const y = i / w | 0;
     if (x < minX) minX = x;
@@ -54461,8 +54461,8 @@ async function laplaceFill(plane, unknown, opts = {}) {
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   }
-  if (idx.length === 0) return { plane: out, iterations: 0, residual: 0, filled: 0, ok: true };
-  if (idx.length === unknown.length) return { plane: out, iterations: 0, residual: 0, filled: 0, ok: false };
+  if (idx2.length === 0) return { plane: out, iterations: 0, residual: 0, filled: 0, ok: true };
+  if (idx2.length === unknown.length) return { plane: out, iterations: 0, residual: 0, filled: 0, ok: false };
   pushPull(out, unknown);
   const span = Math.max(maxX - minX + 1, maxY - minY + 1);
   const omega = Math.min(1.98, 2 / (1 + Math.sin(Math.PI / (span + 1))));
@@ -54473,8 +54473,8 @@ async function laplaceFill(plane, unknown, opts = {}) {
   let it = 0;
   for (; it < maxIters; it++) {
     residual = 0;
-    for (let k = 0; k < idx.length; k++) {
-      const p = idx[k];
+    for (let k = 0; k < idx2.length; k++) {
+      const p = idx2[k];
       const x = p % w;
       const y = p / w | 0;
       let cnt = 0;
@@ -54519,7 +54519,7 @@ async function laplaceFill(plane, unknown, opts = {}) {
     }
     if (opts.tick && it % 25 === 24) await opts.tick();
   }
-  return { plane: out, iterations: it, residual, filled: idx.length, ok: true };
+  return { plane: out, iterations: it, residual, filled: idx2.length, ok: true };
 }
 function integralOf(mask, w, h) {
   const iw = w + 1;
@@ -55502,15 +55502,15 @@ var init_inpaint = __esm({
 // src/tools/ext/mattes.ts
 function snapKeyTimes(times, fps) {
   const out = [];
-  const idx = [];
+  const idx2 = [];
   times.forEach((t, i) => {
     const st = snapToFrame2(t, fps);
     if (out.length === 0 || st > out[out.length - 1]) {
       out.push(st);
-      idx.push(i);
+      idx2.push(i);
     }
   });
-  return { times: out, idx };
+  return { times: out, idx: idx2 };
 }
 function checkWriteSize(keys, vertices, hint = "Key a shorter stretch with `range`, or use a larger decimate_px to drop more keys.") {
   const points = keys * vertices * 3;
@@ -55954,12 +55954,12 @@ function followMismatches(exp, afterRaw) {
   return m;
 }
 function expectOf2(a, plan2) {
-  const idx = spreadIndexes(plan2.times.length, 5);
+  const idx2 = spreadIndexes(plan2.times.length, 5);
   const exp = {
     keys: plan2.keyed ? plan2.times.length : plan2.staticShape ? 0 : null,
     vertexCount: plan2.vertexCount,
-    sampleTimes: plan2.keyed ? idx.map((i) => plan2.times[i]) : plan2.staticShape ? [plan2.refTime] : [],
-    sampleVertices: plan2.keyed ? idx.map((i) => plan2.shapes[i].vertices) : plan2.staticShape ? [plan2.staticShape.vertices] : [],
+    sampleTimes: plan2.keyed ? idx2.map((i) => plan2.times[i]) : plan2.staticShape ? [plan2.refTime] : [],
+    sampleVertices: plan2.keyed ? idx2.map((i) => plan2.shapes[i].vertices) : plan2.staticShape ? [plan2.staticShape.vertices] : [],
     frameDuration: 1 / (plan2.info.comp.fps || 25)
   };
   const fpts = plan2.info.mask?.shape?.feather_points;
@@ -55983,10 +55983,10 @@ async function writeFollow(ctx, a, plan2, expect, label2) {
     expect,
     compId: a.compId,
     read: (phase, written) => {
-      const index = phase === "after" ? written?.mask?.index : plan2.maskIndex;
+      const index2 = phase === "after" ? written?.mask?.index : plan2.maskIndex;
       return {
         host: "mattesMaskRead",
-        args: { comp_id: a.compId, layer: layerRef, mask: index ? { index } : null, ref_time: plan2.refTime, times: phase === "after" ? sampleTimes2 : void 0 }
+        args: { comp_id: a.compId, layer: layerRef, mask: index2 ? { index: index2 } : null, ref_time: plan2.refTime, times: phase === "after" ? sampleTimes2 : void 0 }
       };
     },
     write: { host: "mattesFollowApply", args: followWriteArgs(a, plan2, a.toolName === "ae_caf_prep" ? "CAF prep" : "Mask follow"), timeoutMs: SLOW_TIMEOUT_MS },
@@ -56183,7 +56183,7 @@ async function garbageMatte(ctx, args) {
   });
   const targetIds = prep.pre.layers.map((l) => l.id);
   const feather = toPair(args.feather);
-  const idx = spreadIndexes(prep.times.length, 5);
+  const idx2 = spreadIndexes(prep.times.length, 5);
   const created = args.region !== void 0;
   const exp = {
     matteType: args.matte_type,
@@ -56191,8 +56191,8 @@ async function garbageMatte(ctx, args) {
     created,
     keys: !created ? null : prep.times.length > 0 ? prep.times.length : 0,
     vertexCount: prep.times.length > 0 ? prep.shapes[0].vertices.length : prep.staticShape ? prep.staticShape.vertices.length : 0,
-    sampleTimes: prep.times.length > 0 ? idx.map((i) => prep.times[i]) : prep.staticShape ? [prep.refTime] : [],
-    sampleVertices: prep.times.length > 0 ? idx.map((i) => prep.shapes[i].vertices) : prep.staticShape ? [prep.staticShape.vertices] : [],
+    sampleTimes: prep.times.length > 0 ? idx2.map((i) => prep.times[i]) : prep.staticShape ? [prep.refTime] : [],
+    sampleVertices: prep.times.length > 0 ? idx2.map((i) => prep.shapes[i].vertices) : prep.staticShape ? [prep.staticShape.vertices] : [],
     feather,
     expansion: args.expansion,
     name: args.name ?? (created ? `${prep.pre.layers[0].name} MATTE` : void 0)
@@ -56513,7 +56513,7 @@ var init_mattes = __esm({
       outTangents: s.outTangents.map((p) => [r310(p[0]), r310(p[1])]),
       closed: s.closed
     });
-    pick3 = (list2, idx) => idx.map((i) => list2[i]);
+    pick3 = (list2, idx2) => idx2.map((i) => list2[i]);
     near6 = (a, b, tol) => Math.abs(a - b) <= tol;
     toPair = (f) => f === void 0 ? void 0 : Array.isArray(f) ? [f[0], f[1]] : [f, f];
     mattesTools = [
@@ -56701,10 +56701,10 @@ function makeRingSet(width, height, polyPng, innerPx, outerPx) {
   const mask = ringMask(width, height, polyPng, innerPx, outerPx);
   let n = 0;
   for (let i = 0; i < mask.length; i++) if (mask[i] >= 0.5) n++;
-  const idx = new Uint32Array(n);
+  const idx2 = new Uint32Array(n);
   let k = 0;
-  for (let i = 0; i < mask.length; i++) if (mask[i] >= 0.5) idx[k++] = i;
-  return { width, height, idx, mask };
+  for (let i = 0; i < mask.length; i++) if (mask[i] >= 0.5) idx2[k++] = i;
+  return { width, height, idx: idx2, mask };
 }
 function landing(H, scale, width, height, srcW, srcH, k) {
   const x = k % width;
@@ -57223,8 +57223,8 @@ function colorMismatches(mode, keys, before, after, written) {
     const sw = resolveEffectParams(fx.params, { channels: { names: ["Channels"] }, bypass: { names: ["Bypass Linear Light Conversion"] } });
     const checkSwitch = (key, wrote, label2) => {
       if (typeof wrote !== "number") return;
-      const idx = sw[key];
-      const p = idx === null ? void 0 : fx.params.find((q) => q.index === idx);
+      const idx2 = sw[key];
+      const p = idx2 === null ? void 0 : fx.params.find((q) => q.index === idx2);
       if (!p) {
         m.push({ path: `effect.${key}`, expected: label2, actual: void 0, message: `The "${label2}" parameter is not on the effect` });
         return;
@@ -57236,8 +57236,8 @@ function colorMismatches(mode, keys, before, after, written) {
   }
   for (const ch of CHANNEL_KEYS) {
     for (const r of roles) {
-      const idx = where[`${ch}.${r}`];
-      const p = idx === null ? void 0 : fx.params.find((q) => q.index === idx);
+      const idx2 = where[`${ch}.${r}`];
+      const p = idx2 === null ? void 0 : fx.params.find((q) => q.index === idx2);
       if (!p) {
         m.push({ path: `effect.${ch}.${r}`, expected: wanted[`${ch}.${r}`].names[0], actual: void 0, message: "The parameter is not on the effect" });
         continue;
@@ -59250,8 +59250,8 @@ async function readComp3(ctx, opId, compId, layers, toolName) {
   }
   return info;
 }
-async function renderFrame(ctx, opId, compId, time, index, framesDir, toolName) {
-  const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName });
+async function renderFrame(ctx, opId, compId, time, index2, framesDir, toolName) {
+  const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index2, framesDir, toolName });
   try {
     return { image: decodePngFile(s.path), time: s.time };
   } finally {
@@ -59513,7 +59513,7 @@ function replaceMismatches(plan2, beforeRaw, afterRaw, written) {
     const set2 = plan2.keys;
     const used = written.pin?.values_used === "exact" ? set2.exact : set2.expanded;
     const n = plan2.times.length;
-    const idx = sampleIdx3(n);
+    const idx2 = sampleIdx3(n);
     const roleProp = (role) => keyItem.props.find((p) => p.role === role);
     const compareVec = (role, values, tol) => {
       const p = roleProp(role);
@@ -59522,7 +59522,7 @@ function replaceMismatches(plan2, beforeRaw, afterRaw, written) {
         return;
       }
       expectThat(m, p.numKeys === n, `keys.${role}.numKeys`, n, p.numKeys, "Key count in the read-back differs from the frames written");
-      for (const i of idx) {
+      for (const i of idx2) {
         const got = p.samples.find((s) => near7(s.time, plan2.times[i], 1e-6))?.value;
         const same = Array.isArray(got) && values[i].every((v, k) => typeof got[k] === "number" && near7(got[k], v, tol));
         expectThat(m, same, `keys.${role}@${plan2.times[i]}`, values[i], got, "A key's value differs from what was written");
@@ -59537,7 +59537,7 @@ function replaceMismatches(plan2, beforeRaw, afterRaw, written) {
       if (!rot) m.push({ path: "keys.rotation", expected: "read back", actual: void 0, message: "The rotation property was not found in the read-back" });
       else {
         expectThat(m, rot.numKeys === n, "keys.rotation.numKeys", n, rot.numKeys, "Key count in the read-back differs from the frames written");
-        for (const i of idx) {
+        for (const i of idx2) {
           const got = rot.samples.find((s) => near7(s.time, plan2.times[i], 1e-6))?.value;
           expectThat(m, typeof got === "number" && near7(got, plan2.keys.transform.rotation[i], 0.02), `keys.rotation@${plan2.times[i]}`, plan2.keys.transform.rotation[i], got, "A rotation key differs from what was written");
         }
@@ -61141,8 +61141,8 @@ function restoreToArgs(prev) {
       vo[k] = val;
     }
     if (Object.keys(vo).length) {
-      const idx = typeof p.viewer?.options_view_index === "number" ? p.viewer.options_view_index : p.viewer?.active_view_index;
-      if (typeof idx === "number") vo.view_index = idx;
+      const idx2 = typeof p.viewer?.options_view_index === "number" ? p.viewer.options_view_index : p.viewer?.active_view_index;
+      if (typeof idx2 === "number") vo.view_index = idx2;
       out.viewer_options = vo;
     }
   }
@@ -61973,8 +61973,8 @@ async function dryRun(args, ctx) {
   if (before && Array.isArray(plan2.order_after)) {
     const map = indexMapFromOrder(before, plan2.order_after, plan2.order_truncated === true);
     const nameOf2 = new Map(before.layers.map((l) => [l.id, l.name]));
-    would_break = indexReferenceWarnings(before, map, (index) => {
-      const id = plan2.order_after[index - 1];
+    would_break = indexReferenceWarnings(before, map, (index2) => {
+      const id = plan2.order_after[index2 - 1];
       return typeof id === "number" ? { layer_id: id, layer_name: nameOf2.get(id) ?? "" } : void 0;
     });
   }
@@ -61986,9 +61986,9 @@ async function dryRun(args, ctx) {
     for (const l of dest.layers) map.set(l.id, l.index + copies);
     const byIndex = new Map(dest.layers.map((l) => [l.index + copies, l]));
     would_break = [
-      ...indexReferenceWarnings(dest, map, (index) => {
-        if (index <= copies) return { layer_id: 0, layer_name: "(a copy)" };
-        const l = byIndex.get(index);
+      ...indexReferenceWarnings(dest, map, (index2) => {
+        if (index2 <= copies) return { layer_id: 0, layer_name: "(a copy)" };
+        const l = byIndex.get(index2);
         return l ? { layer_id: l.id, layer_name: l.name } : void 0;
       }),
       ...copiedToCompWarnings({ ...before, with_comp: void 0 }, before, {
@@ -62015,8 +62015,8 @@ function copiedToCompWarnings(before, after, w) {
     const map = indexMapFromStack(destBefore, destAfter);
     const byIndex = new Map(destAfter.layers.map((l) => [l.index, l]));
     out.push(
-      ...indexReferenceWarnings(destBefore, map, (index) => {
-        const l = byIndex.get(index);
+      ...indexReferenceWarnings(destBefore, map, (index2) => {
+        const l = byIndex.get(index2);
         return l ? { layer_id: l.id, layer_name: l.name } : void 0;
       })
     );
@@ -62380,8 +62380,8 @@ var init_layerops = __esm({
               if (before && after && !w.no_op && STRUCTURAL.includes(args.action)) {
                 const map = indexMapFromStack(before, after);
                 const byIndex = new Map(after.layers.map((l) => [l.index, l]));
-                expression_warnings = indexReferenceWarnings(before, map, (index) => {
-                  const l = byIndex.get(index);
+                expression_warnings = indexReferenceWarnings(before, map, (index2) => {
+                  const l = byIndex.get(index2);
                   return l ? { layer_id: l.id, layer_name: l.name } : void 0;
                 });
                 if (args.action === "rename") expression_warnings.push(...nameReferenceWarnings(after, w.renames ?? []));
@@ -62771,8 +62771,8 @@ var init_timeline = __esm({
             if (b && a && !w.no_op) {
               const map = indexMapFromStack(b, a);
               const byIndex = new Map(a.layers.map((l) => [l.index, l]));
-              warnings = indexReferenceWarnings(b, map, (index) => {
-                const l = byIndex.get(index);
+              warnings = indexReferenceWarnings(b, map, (index2) => {
+                const l = byIndex.get(index2);
                 return l ? { layer_id: l.id, layer_name: l.name } : void 0;
               });
             }
@@ -63641,8 +63641,8 @@ function parseCsv(text) {
   const header = records[0].map((h) => h.trim());
   return records.slice(1).map((r) => {
     const row = {};
-    header.forEach((h, idx) => {
-      row[h] = r[idx] ?? "";
+    header.forEach((h, idx2) => {
+      row[h] = r[idx2] ?? "";
     });
     return row;
   });
@@ -64082,9 +64082,9 @@ function stackMismatches(args, beforeRaw, afterRaw, w) {
   }
   return m;
 }
-function effectAt(snapshot, index) {
+function effectAt(snapshot, index2) {
   const effects = snapshot?.effects ?? [];
-  return effects.find((e) => e.index === index);
+  return effects.find((e) => e.index === index2);
 }
 function effectCount(snapshot) {
   return (snapshot?.effects ?? []).length;
@@ -67286,7 +67286,7 @@ function maskMismatches(args, beforeRaw, afterRaw, written) {
   const before = beforeRaw;
   const after = afterRaw;
   if (!before || !after) return m;
-  const seen = (index) => !(after.truncated === true && index > after.masks.length);
+  const seen = (index2) => !(after.truncated === true && index2 > after.masks.length);
   const added = written.added ?? [];
   const removed = written.removed ?? [];
   const duplicated = written.duplicated ?? [];
@@ -67310,7 +67310,7 @@ function maskMismatches(args, beforeRaw, afterRaw, written) {
       const nm = args.set?.[i]?.name;
       if (nm) renamed.set(c.index, nm);
     });
-    const nameOf2 = (idx) => renamed.get(idx) ?? before.masks.find((x) => x.index === idx)?.name;
+    const nameOf2 = (idx2) => renamed.get(idx2) ?? before.masks.find((x) => x.index === idx2)?.name;
     const wantOrder = plan2.map((e) => e.original !== void 0 ? nameOf2(e.original) : void 0);
     const now = after.masks.slice(0, plan2.length).map((x) => x.name);
     const bad4 = wantOrder.some((n, i) => n !== void 0 && n !== now[i]);
@@ -72098,6 +72098,164 @@ init_diagnostics();
 init_dialogs();
 init_call_context();
 
+// src/mcp-modern.ts
+var MODERN_PROTOCOL_VERSIONS = ["2026-07-28"];
+var LEGACY_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+var ALL_PROTOCOL_VERSIONS = [...MODERN_PROTOCOL_VERSIONS, ...LEGACY_PROTOCOL_VERSIONS];
+var META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
+var META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+var META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+var META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
+var ERR_HEADER_MISMATCH = -32020;
+var ERR_UNSUPPORTED_PROTOCOL_VERSION = -32022;
+var CACHE_TTL_MS = 3e5;
+var MODERN_ONLY_METHODS = ["server/discover", "skills/list", "skills/get"];
+function isPlainObject2(val) {
+  return typeof val === "object" && val !== null && !Array.isArray(val);
+}
+function errorResponse(id, code, message, data) {
+  const error = { code, message };
+  if (data !== void 0) error.data = data;
+  return { era: "error", httpStatus: 400, response: { jsonrpc: "2.0", id, error } };
+}
+function idOf(message) {
+  const raw = message.id;
+  return typeof raw === "string" || typeof raw === "number" || raw === null ? raw : null;
+}
+function classifyRequest(message) {
+  if (!isPlainObject2(message)) return { era: "legacy" };
+  const method = message.method;
+  if (typeof method !== "string" || method.length === 0) return { era: "legacy" };
+  if (!("id" in message) || message.id === void 0) return { era: "legacy" };
+  const id = idOf(message);
+  const params = isPlainObject2(message.params) ? message.params : {};
+  const meta = isPlainObject2(params._meta) ? params._meta : {};
+  const version = meta[META_PROTOCOL_VERSION];
+  if (version === void 0) {
+    if (MODERN_ONLY_METHODS.includes(method)) {
+      return errorResponse(
+        id,
+        -32602,
+        `Invalid params: ${method} needs _meta["${META_PROTOCOL_VERSION}"] (${MODERN_PROTOCOL_VERSIONS[0]})`,
+        { supported: ALL_PROTOCOL_VERSIONS }
+      );
+    }
+    return { era: "legacy" };
+  }
+  if (typeof version === "string" && MODERN_PROTOCOL_VERSIONS.includes(version)) {
+    const caps = meta[META_CLIENT_CAPABILITIES];
+    if (!isPlainObject2(caps)) {
+      return errorResponse(id, -32602, `Invalid params: missing _meta["${META_CLIENT_CAPABILITIES}"]`);
+    }
+    const info = meta[META_CLIENT_INFO];
+    return { era: "modern", version, clientCapabilities: caps, ...isPlainObject2(info) ? { clientInfo: info } : {} };
+  }
+  if (typeof version === "string" && LEGACY_PROTOCOL_VERSIONS.includes(version)) {
+    return { era: "legacy" };
+  }
+  return errorResponse(id, ERR_UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version", {
+    supported: ALL_PROTOCOL_VERSIONS,
+    requested: version
+  });
+}
+function sanitizeClientLabel(value, collapseSpaces = false) {
+  if (typeof value !== "string") return "";
+  const printable = value.replace(/[^ -~]+/g, " ");
+  return (collapseSpaces ? printable.replace(/ {2,}/g, " ") : printable).trim().slice(0, 40);
+}
+function clientLabelOf(c) {
+  return sanitizeClientLabel(c.clientInfo?.name, true);
+}
+function decorateResult(payload, serverInfo) {
+  const body = isPlainObject2(payload) ? payload : {};
+  const meta = isPlainObject2(body._meta) ? body._meta : {};
+  return { ...body, resultType: "complete", _meta: { ...meta, [META_SERVER_INFO]: serverInfo } };
+}
+function cacheable(payload, cacheScope, ttlMs = CACHE_TTL_MS) {
+  return { ...payload, ttlMs, cacheScope };
+}
+function headerValue(headers, name) {
+  if (!headers) return void 0;
+  const wanted = name.toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() !== wanted) continue;
+    const v = headers[key];
+    if (v === void 0) return void 0;
+    return Array.isArray(v) ? v[0] : v;
+  }
+  return void 0;
+}
+var SENTINEL = /^=\?base64\?([A-Za-z0-9+/]*={0,2})\?=$/;
+function decodeHeaderValue(value) {
+  if (!value.startsWith("=?base64?") || !value.endsWith("?=")) return value;
+  const m = SENTINEL.exec(value);
+  if (!m || m[1].length % 4 !== 0) return null;
+  const bytes = Buffer.from(m[1], "base64");
+  const text = bytes.toString("utf8");
+  return Buffer.from(text, "utf8").equals(bytes) ? text : null;
+}
+function hasInvalidChars(value) {
+  return /[^\t -~]/.test(value);
+}
+function show(value) {
+  const s = value.length > 80 ? `${value.slice(0, 80)}...` : value;
+  return `'${s}'`;
+}
+function validateModernHeaders(headers, body, version) {
+  const fail6 = (message) => ({ ok: false, message: `Header mismatch: ${message}` });
+  const protocol = headerValue(headers, "mcp-protocol-version");
+  const methodHeader = headerValue(headers, "mcp-method");
+  const nameHeader = headerValue(headers, "mcp-name");
+  for (const [label2, value] of [["MCP-Protocol-Version", protocol], ["Mcp-Method", methodHeader], ["Mcp-Name", nameHeader]]) {
+    if (value !== void 0 && hasInvalidChars(value)) return fail6(`${label2} header contains invalid characters`);
+  }
+  if (protocol === void 0) return fail6("MCP-Protocol-Version header is missing");
+  if (protocol !== version) {
+    return fail6(`MCP-Protocol-Version header value ${show(protocol)} does not match body value ${show(version)}`);
+  }
+  if (methodHeader === void 0) return fail6("Mcp-Method header is missing");
+  if (methodHeader !== body.method) {
+    return fail6(`Mcp-Method header value ${show(methodHeader)} does not match body value ${show(body.method)}`);
+  }
+  const params = isPlainObject2(body.params) ? body.params : {};
+  let expected;
+  let required = false;
+  if (body.method === "tools/call" || body.method === "prompts/get") {
+    expected = params.name;
+    required = true;
+  } else if (body.method === "resources/read") {
+    expected = params.uri;
+    required = true;
+  } else {
+    expected = typeof params.name === "string" ? params.name : params.uri;
+  }
+  if (typeof expected !== "string") return { ok: true };
+  if (nameHeader === void 0) return required ? fail6("Mcp-Name header is missing") : { ok: true };
+  const decoded = decodeHeaderValue(nameHeader);
+  if (decoded === null) return fail6("Mcp-Name header is not valid Base64-encoded UTF-8");
+  if (decoded !== expected) {
+    return fail6(`Mcp-Name header value ${show(decoded)} does not match body value ${show(expected)}`);
+  }
+  return { ok: true };
+}
+function bodyVersionHeaderMismatch(headers, body) {
+  const params = isPlainObject2(body.params) ? body.params : {};
+  const meta = isPlainObject2(params._meta) ? params._meta : {};
+  const version = meta[META_PROTOCOL_VERSION];
+  const protocol = headerValue(headers, "mcp-protocol-version");
+  if (version === void 0 || protocol === void 0) return null;
+  const bodyText = typeof version === "string" ? version : JSON.stringify(version);
+  if (protocol === bodyText) return null;
+  return `Header mismatch: MCP-Protocol-Version header value ${show(protocol)} does not match body value ${show(bodyText)}`;
+}
+function legacyBodyWithModernHeader(headers) {
+  const protocol = headerValue(headers, "mcp-protocol-version");
+  if (protocol !== void 0 && MODERN_PROTOCOL_VERSIONS.includes(protocol)) {
+    return `Header mismatch: MCP-Protocol-Version header names ${show(protocol)} but the body has no matching _meta["${META_PROTOCOL_VERSION}"]`;
+  }
+  return null;
+}
+
 // src/popups.ts
 init_ask();
 init_dialogs();
@@ -73790,21 +73948,21 @@ function buildIndex2() {
   return searchIndex;
 }
 function rankTools(query, candidates) {
-  const idx = buildIndex2();
+  const idx2 = buildIndex2();
   const terms = [...new Set(tokenize(query))];
-  const N = idx.docs.length;
+  const N = idx2.docs.length;
   const k1 = 1.4;
   const b = 0.6;
   const scored = [];
-  for (const doc of idx.docs) {
+  for (const doc of idx2.docs) {
     if (candidates && !candidates.has(doc.tool.name)) continue;
     let score = 0;
     for (const term of terms) {
       const f = doc.tf.get(term) ?? 0;
       if (!f) continue;
-      const n = idx.df.get(term) ?? 0;
+      const n = idx2.df.get(term) ?? 0;
       const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
-      score += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * doc.length / idx.avg));
+      score += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * doc.length / idx2.avg));
     }
     const bares = searchNames(doc.tool);
     const rawTerms = query.toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
@@ -73934,7 +74092,7 @@ async function runSearch(args, usage) {
     if (detail === "schema") entry.inputSchema = trimSchema(toolInputSchema(o.tool), o.tool.name);
     page.push(entry);
   }
-  const build = (n2, withSchema = true) => {
+  const build2 = (n2, withSchema = true) => {
     const rows = page.slice(0, n2).map((e) => {
       if (withSchema || !("inputSchema" in e)) return e;
       const { inputSchema: _dropped, ...rest } = e;
@@ -73958,12 +74116,12 @@ async function runSearch(args, usage) {
     return result2;
   };
   let n = page.length;
-  let result = build(n);
+  let result = build2(n);
   while (n > 1 && sizeOf(result) > SEARCH_OUTPUT_MAX) {
     n--;
-    result = build(n);
+    result = build2(n);
   }
-  if (sizeOf(result) > SEARCH_OUTPUT_MAX) result = build(n, false);
+  if (sizeOf(result) > SEARCH_OUTPUT_MAX) result = build2(n, false);
   return formatToolResponse(result);
 }
 async function runGetSchema(args) {
@@ -74155,10 +74313,31 @@ init_call_context();
 init_registry();
 
 // src/guidance/content.generated.ts
-var GUIDANCE_FILES = {
-  "NOTICE.md": '# Sources and licences\n\nThis skill is Chroma\'s own synthesis, written in its own words. It adapts ideas and numbers from\nthe sources below; where they disagreed, the choice made is noted in the text (mostly by the\n"register" table in SKILL.md). No source text was copied verbatim. Researched 2026-11-05.\n\n| Source | Licence | Used for |\n|---|---|---|\n| [lottiefiles/motion-design-skill](https://github.com/lottiefiles/motion-design-skill) | MIT, (c) 2025 LottieFiles | duration and easing tables, archetypes, springs, Disney principles with numbers, stagger budgets, the 1/3 rules, ambient loops, severity tiers, symptom fixes |\n| [charlie947/motion-graphics-skills](https://github.com/charlie947/motion-graphics-skills) | MIT, (c) Charlie Hills | brand-first workflow, facts discipline, the 8 s move/hold/return loop, effect techniques, safe zones and hero sizes, banned defaults, one-change revisions, delivery specs |\n| [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes): hyperframes-animation, hyperframes-core, general-video, motion-graphics, and the later `skills/hyperframes/references` | Apache-2.0, (c) HeyGen | ease by role, motion budget, transitions as handoffs, velocity matching and recipes, beat grid, reading time, type floors, captions, audio levels, beat shares, pacing and staleness, review loop (measure then look, contact sheets, P0-P2 notes), the "looks generated" list |\n| [Sunwood-ai-labs/hyperframes-motion-reel-skill](https://github.com/Sunwood-ai-labs/hyperframes-motion-reel-skill) | MIT, (c) 2026 Sunwood AI Labs | beat-grid-first timing, contrast of pace, text as image, motion-blur limits, state as a function of time |\n| [geekjourneyx/hyperframes-motion-director](https://github.com/geekjourneyx/hyperframes-motion-director) | AGPL-3.0 | **ideas only, paraphrased, nothing copied**: brief then confirm, stills before motion, layout as rectangles, vertical title tiers, hook timing gates, primitives chosen by meaning, inspectable transition midpoints, rendered-frame evidence, learning rules from defects |\n\nCaption note: an earlier draft of `references/sound-and-captions.md` followed the HyperFrames\ncaptions references too closely. That section is now rewritten in Chroma\'s own words and kept to\nmotion points; the caption rules moved to the separate `captions` skill, whose `NOTICE.md`\ncredits the HyperFrames caption ideas (Apache-2.0, (c) HeyGen: Whisper failure modes, word\ngrouping by energy, clean-up of words over silence) along with the other sources.\n\nChanges from the sources: rewritten for any toolchain with After Effects as the main target\n(frame conversions, bezier to AE influence and speed, chroma-ae MCP tool mapping); conflicting\nadvice reconciled by register; web-, HTML- and GSAP-specific material removed.\n',
-  "SKILL.md": "---\nname: chroma-motion-director\ndescription: Direct and build motion pieces end to end: brief, numeric spec, still frames, choreography, sound, review and delivery, with measured timing, easing, stagger, transition, type, caption and audio rules. Use for any motion graphics, launch or promo film, social reel, explainer, title sequence, logo sting, lower third, stat or chart animation, kinetic type, or motion review, whether it is built in After Effects (through the chroma-ae MCP), Remotion, HyperFrames, Lottie or code. Also use to critique motion (\"it feels robotic / cheap / like slides / too fast\") and to turn adjectives into numbers. Trigger phrases: 'motion', 'animate', 'animation', 'promo', 'launch video', 'reel', 'sting', 'lower third', 'kinetic type', 'title sequence', 'explainer', 'easing', 'stagger', 'transition', 'make it feel premium', 'review this animation'.\nmetadata:\n  version: \"1.0.0\"\n  sources: see NOTICE.md\n---\n\n# Chroma motion director\n\nOne skill for directing motion, from a one-line brief to a delivered file. It merges eight\npublic skills (see `NOTICE.md`) and resolves where they disagree. The numbers are the point:\nevery rule below is meant to be measured, not admired.\n\n**Load only what the task needs:**\n\n| Task | Read |\n|---|---|\n| Any new piece | this file, then `references/spec.md` |\n| Timing, easing, springs, ms to frames, AE ease values | `references/timing-and-easing.md` |\n| Groups, stagger, cameras, transitions between scenes | `references/choreography.md` |\n| Text sizes, reading time, safe zones, layout, colour | `references/type-and-layout.md` |\n| Structure, beat shares, pacing, scene recipes | `references/story-and-pacing.md` |\n| Music, voice, sound effects, levels, captions | `references/sound-and-captions.md` |\n| Checking a piece, writing notes, the \"looks generated\" list | `references/review.md` |\n\nFor anything made for Chroma, `chroma-brand-guidelines` sets the look (palette, type, voice);\nthis skill sets the motion. In After Effects, drive the work through the `chroma-ae` MCP tools\n(`ae_motion_review`, `ae_contact_sheet`, `ae_check_legibility`, `ae_set_keyframe_ease`,\n`ae_stagger`, `ae_loudness_check` and so on) rather than raw JSX.\n\n## The process\n\nSix gates. Do not skip one because the brief is short; shrink it instead.\n\n1. **Brief, then stop.** One sentence of intent (what the viewer should feel or know at the\n   end), the audience, the format (size, fps, length, platform), the single message, the arc,\n   and what must not happen. Ask at most one clarifying question; where something is unknown,\n   write `ASK ME` rather than guess (never guess a hex colour or a fact). Show the beat sheet and\n   wait for a yes before building.\n2. **Spec: adjectives into numbers.** Write the piece's `MOTION.md` from\n   `references/spec.md`: register, signature ease, a three-tier duration palette, stagger,\n   overshoot budget, colour roles, type sizes, safe zones, the banned list, and the beat table.\n   \"Premium\" means 350-600 ms, ease (0.4, 0, 0.2, 1), no overshoot; it does not mean \"nice\".\n   A project that already has a `MOTION.md` or brand file: read it first and follow it.\n3. **Stills before motion.** Build the end state of every beat as a still and check it: one\n   hero, readable at phone size, inside the safe zones, nothing touching an edge it shouldn't.\n   Animate *from and to* those stills. A frame that fails as a still will not be saved by motion.\n4. **Choreograph.** One primary motion idea per scene, at most one supporting motion, one\n   signature moment per film. Ease by role, stagger by importance, overlap the next element when\n   the last is 30-50 % done, hand scenes off without fading out. Drive cuts and hits from one\n   beat grid when there is music.\n5. **Review: measure, then look.** Run the measured checks first (`references/review.md`), then\n   contact sheets: each beat's start and middle, a strip across every cut (\u22120.2 s to +0.2 s), and\n   the beat frames at phone width (360 px). Notes are `t=4.2s \xB7 where \xB7 problem \u2192 exact change \xB7\n   what stays`, ranked P0/P1/P2. Report only what you actually saw; say so when there is nothing.\n6. **Deliver and verify the file.** Check the rendered file, not the preview: duration, fps,\n   size, codec, colour range, loudness, frame 0 (it is the thumbnail: never black, never a lone\n   logo). State what was measured and what was only looked at.\n\n**Revisions:** one change per note. Keep the motion, timing and approved parts exactly as they\nare, and say what changed. Build exactly what was asked; offer extras instead of adding them.\n\n## Pick a register first\n\nMost conflicts between the sources disappear once the register is fixed. Pick one per piece\n(a 90/10 mix at most) and write it in the spec.\n\n| Register | Use for | Durations | Overshoot | Stagger, total | Character |\n|---|---|---|---|---|---|\n| **UI micro** | product UI in a demo, buttons, toggles, cards | 80-450 ms | 0-5 % | 20-60 ms, under 400 ms | quick, functional, no bounce on UI |\n| **Brand film** (default) | launches, promos, reels, titles, stings | moves 300-800 ms, reveals 0.8-1.6 s | 0 % premium, 3-10 % energetic | 40-120 ms, about 500 ms | arrive slow, leave clean, still when landed |\n| **Energetic** | social hooks, sport, music-led cuts | 150-400 ms | 10-25 % on position or scale only | 30-60 ms | beat-driven, hard accents, contrast of pace |\n| **Handmade** | editorial, explainer, collage, Vox-like | on twos (hold each pose 2 frames at 24 fps) | none | per element, loose | stepped, tactile, never smooth corporate easing |\n\nChroma's own work defaults to **brand film, premium**: no overshoot, no glow, no bounce,\nlanded type dead still.\n\n## Core rules (the short version)\n\n**Easing**\n- Out for arrivals, in for exits, in-out for moves between positions and for camera. Linear only\n  for rotation, progress, timers and genuinely mechanical motion.\n- Use at least three different eases in a piece; no more than two tweens with the same ease and\n  duration in a scene. Everything on one ease at 0.5 s is the clearest sign of generated motion.\n- Arrivals take long-tailed ease-outs (expo or quart out). Exits are 40-50 % shorter than\n  entrances and ease in.\n- Springs: damping ratio 0.7-0.85 reads premium, 0.4-0.6 playful, under 0.3 cartoon. Position\n  and scale may overshoot; opacity, colour and numbers never do.\n\n**Choreography**\n- One hero per moment; at most a third of a group moves at once. Dim the others to 40-60 %.\n- Stagger by importance, not by layer order: letters 1 frame apart, words 60-120 ms, list items\n  40-80 ms, and keep a group's total stagger near 500 ms so it reads as one beat.\n- Nothing travels more than a third of the frame without an intermediate key or an arc.\n- After a group resolves, leave 100-200 ms of stillness; a landed title stays dead still.\n- First move 0.1-0.3 s in, never at frame 0 of a scene unless it is a cut-in.\n\n**Transitions**\n- Hand off, don't fade out then in: the outgoing and incoming motion happen together, with the\n  ease mirrored across the seam (in on the way out, out on the way in) and the fastest frames at\n  the cut. Match direction, axis and the sign of any scale change across the cut.\n- Three to five kinds of transition per film, each with a cause on screen. One primary for\n  60-70 % of seams. At most a third are hard cuts. Never crossfade between two different worlds.\n- Every transition has a midpoint frame worth looking at. A blank midpoint is a failure.\n\n**Type**\n- Readable text is at least 2.6 % of the frame's short side (28 px at 1080). Titles 4-9 % of\n  frame height; hero words can fill 60-90 % of the width.\n- Hold a line 0.5 s + 0.3 s per word; the last line at least 2 s; at most 6 words a line.\n- Text is still before it has to be read. Animate text with a device (mask, split, scan,\n  compress, assemble, path handoff), not opacity plus a 20 px slide on everything.\n\n**Pace**\n- The hook is readable by 0.8-1.2 s; frame 0 is never empty. Something new every 2-4 s.\n  Alternate dense and still beats; the slowest scene is about three times the fastest.\n- Over 3 s with nothing changing is a dead stretch. Any single treatment goes stale after about\n  6 s.\n\n**Sound**\n- Voice leads; music sits about 14 % under it and is carved around it, not just ducked. Social\n  mixes at \u221216 to \u221214 LUFS, peaks at \u22121 dBTP or lower. A hit's peak lands one frame after its\n  picture. Effects only for real on-screen causes.\n\n**Content**\n- Every name, date and number on screen comes from an approved list. Sample data carries a\n  visible \"illustrative data\" label.\n- Deletion test for every element: if removing it changes nothing, remove it.\n\n## Working in After Effects\n\n- Convert ms to frames at the comp's frame rate before keying (200 ms is 6 f at 30 fps, 4.8 f\n  at 24, so round to 5 and say so). Beat frames come from the beat index, never accumulated.\n- Cubic-bezier eases become AE keyframe influence and speed: the table is in\n  `references/timing-and-easing.md`. Apply them with `ae_set_keyframe_ease`; check them with\n  `ae_motion_review` (linear keys, abrupt starts and stops, overshoot, speed jumps).\n- Seed every random (`seedRandom(n, true)` in expressions) so any frame renders the same.\n- Use `ae_contact_sheet` for the sheets in step 5, `ae_check_legibility` and `ae_measure_text`\n  for type, `ae_loudness_check` for levels, `ae_check_delivery_file` on the render.\n",
-  "references/choreography.md": `# Choreography, cameras and transitions
+var SKILL_TEXT = {
+  "ae-extendscript": {
+    "SKILL.md": '---\nname: ae-extendscript\ndescription: "How to write ExtendScript that the chroma-ae MCP will accept and run safely in After Effects: code for ae_run_jsx and for saved skills run by ae_skill_run. Covers ES3 syntax limits (no let, const, arrow functions, template strings, class, for...of, chained ternaries; no native JSON), how the code is wrapped and what it returns, the mutates and expect parameters, undo groups, read-back after a write, stale frames from saveFrameToPng, app.executeCommand, timeouts, the safety lint (what it refuses and which tool to use instead) and when to use a dedicated tool instead. Load before calling ae_run_jsx or ae_skill_save, when a script is refused as not ES3 or by the safety lint, when ExtendScript misbehaves silently, or when asked to script After Effects, run JSX or automate something no dedicated tool covers."\nmetadata:\n  version: "1.0.0"\n---\n\n# ExtendScript for ae_run_jsx\n\n`ae_run_jsx` runs your code inside After Effects. Use it only when no dedicated tool does the job.\nThe same rules apply to the steps of a saved skill (`ae_skill_save`, `ae_skill_run`): they get the\nsame ES3 check and the same safety lint. Each step is also a function body. It sees `args` (the run\'s\narguments), `prev` (what the previous step returned) and `results`; all steps run in one evalScript,\nso a writing skill is one undo step. Write steps that take what varies from `args`.\n\n## Find a dedicated tool first\n\nA dedicated tool validates its input, takes a checkpoint, reads the result back and returns a\nreceipt. Your script gets the same checkpoint and receipt when `mutates: true`, but nothing checks\nwhat the code does.\n\n- The server lists 34 everyday tools by default (the core toolset) plus `ae_search_tools`,\n  `ae_get_tool_schema` and `ae_invoke_tool`. The rest (about 150 more) are reached through those.\n- `ae_search_tools { query }` finds the rest (keywords, or `pattern` for a name fragment such as\n  `^ae_track`). `ae_get_tool_schema { name }` gives the full schema. `ae_invoke_tool { name, arguments }`\n  runs any tool; put its arguments under `arguments`.\n- Search and schema calls never touch After Effects, so they answer even while AE is busy.\n- HTTP clients can ask for every tool in the list with the header `X-Chroma-Toolset: full`. The\n  stdio relay does the same with `CHROMA_AE_MCP_TOOLSET=full`. Core is the default for everyone.\n- Core tools you will want before reaching for a script: `ae_status`, `ae_get_project`, `ae_get_comp`,\n  `ae_comp_tree`, `ae_find_layers`, `ae_get_layer_props` (`meta: true` shows what a property accepts),\n  `ae_get_keyframes`, `ae_set_property`, `ae_batch_set`, `ae_set_text`, `ae_create_layer`,\n  `ae_create_comp`, `ae_layer_ops` (parent, reorder, duplicate, delete, trim, rename), `ae_add_effect`,\n  `ae_set_effect`, `ae_import_footage`, `ae_save`, `ae_snapshot_frame`.\n- Check `ae_skill_list` (reached through `ae_search_tools`) too: the user may already have a saved\n  skill for the job.\n\n## The tool\n\n`ae_run_jsx { code, mutates, label, expect? }`. It also takes `idempotency_key`, as every write tool does\n(a resend with the same key and arguments returns the first answer instead of running again).\n\n| Field | Rule |\n|---|---|\n| `code` | The body of a function. Write `return <value>` to send a result. Do not write `function () {}` around it. |\n| `mutates` | Required, no default. `true` if the script changes anything in the project. |\n| `label` | Required. Names the undo step in AE and the entry in the panel log. |\n| `expect` | Required when `mutates` is true: `{ project_path, comp_id? }`. Copy `project_path` from `ae_status` (`"<unsaved>"` for a project never saved). If AE has something else open the call is refused with `kind: "guard"` and nothing runs. |\n\nThe server wraps `code` as `(function(){ <code> \\n})()` evaluated in the panel\'s scope, so a\n`return` works and line numbers in errors match your `code`. Variables you declare with `var` stay\ninside; an undeclared name becomes a global and leaks into the next call. Always declare with `var`.\n\n## Return values\n\nThere is no native `JSON` in ExtendScript, so do not call `JSON.stringify`. Return plain data and the\nhost converts it:\n\n- Numbers, strings, booleans, arrays and plain objects (`{ a: 1 }`) come back as they are.\n- An After Effects object (a layer, a property, a comp) comes back as a short tag such as\n  `[Layer "Title" #12]`, not its contents. Copy out the fields you need.\n- No `return`, or `return null`: the result is `{ returned: null, note: ... }`. That is not a failure.\n  Anything the script changed is applied. Read state back; do not run it again.\n- Output is bounded: lists at 500 entries (the result then says `truncated: true`), strings at 20,000\n  characters. Return less.\n- If you need a string of JSON, `__chromaAe.stringify(value)` exists in the host (it is the panel\'s\n  own serialiser). Prefer returning the object.\n- Read-only result: `{ op_id, result }`. Mutating result: `{ op_id, applied: true, result, checkpoint,\n  receipt, user_changed? }`. Keep the `op_id`: `ae_skill_save { from_op_ids }` can turn a script that\n  worked into a reusable skill (only if the user asks).\n\n## ES3 only\n\nExtendScript is ECMAScript 3. The server checks the syntax it can see before After Effects is called\nand refuses the call, with the line number, for `let`, `const`, `class`, arrow functions, template\nstrings, `for...of` and chained ternaries. Nothing runs. The other rules below are not checked: break\nthem and the script fails inside After Effects, or quietly does the wrong thing.\n\n- Use `var` and `function`. No `let`, `const`, `class`, arrow functions (`=>`), template strings\n  (backticks) or `for (x of y)`.\n- No `forEach`, `map`, `filter`, `reduce` or `Array.prototype.indexOf`. The host does not polyfill\n  them (`core.jsx` has none). Write a `for` loop with an index. (`String.prototype.indexOf` is ES3\n  and fine.)\n- **No chained ternaries.** `a ? b : c ? d : e` parses as `(a ? b : c) ? d : e`, so the logic is\n  silently wrong. The server refuses it. Use `if / else`.\n- Do not use ES3 reserved words (`default`, `delete`, `class`, `enum`, `export` and the like) as\n  variable names or unquoted object keys. Quote the key: `{ "default": 1 }`.\n- Precaution, not measured: keep the code ASCII (use `\\u00e9`-style escapes in strings).\n- `property(name)` returns `null` for a missing property rather than throwing. Test for `null`.\n- Do not hold a `Property` across `addProperty`, `remove()` or `moveTo`. References to siblings go\n  stale ("Object is invalid"). Look the property up again by index or match name after each of those.\n- Effect parameters: address by match name. Section headers share names with parameters, so\n  `property("Transform")` on an effect can return the header, not a value.\n- A 2D layer still has three-dimensional Position, Scale and Anchor Point. Setting Scale to\n  `[100, 75]` reads back as `[100, 75, 100]`. Compare only the dimensions you set.\n- Do not run long synchronous loops. They freeze After Effects\' UI. The default wait for one call is\n  120 seconds, and `ae_run_jsx` has no parameter to extend it.\n\n## Undo, read-back and receipts\n\n- **One undo group per call, opened and closed by the server** (`withUndo`). Do not call\n  `app.beginUndoGroup` or `app.endUndoGroup` yourself. A group begun in one call and ended in another\n  is discarded by AE. One Ctrl+Z in AE removes the whole call.\n- **Do not verify in the same script that wrote.** A read in the same evalScript as the write returns\n  stale cached values. With `mutates: true` the server reads before and after in separate calls and\n  returns `receipt` (what differs). For your own checks, make a second `ae_run_jsx` call with\n  `mutates: false`, or use `ae_get_layer_props`.\n- **Before a mutating call**, with automatic checkpoints on (the default, for project files up to\n  250 MB; `ae_auto_checkpoint` changes it), the server copies the saved `.aep` to\n  `<projectdir>/_mcp_checkpoints/` (the last save, not unsaved work:\n  `checkpoint.unsaved_changes_not_included` says so). `checkpoint` in the result says whether it was\n  made or skipped, and why.\n- A script that throws part-way has already run its earlier statements inside the undo group. A\n  mutating failure normally reports `outcome: "unknown"`; read the state, then decide. Do not resend.\n- Not everything has an undo step: saves, project open and close, renders and font replacement do not.\n\n## Things that do not work through CEP\n\n- `app.executeCommand` does nothing for most commands, silently. Use the DOM: `comp.duplicate()`,\n  `layer.duplicate()`, `layer.remove()`. (Window-menu commands were measured to toggle panels on\n  AE 26.0, but they toggle, so check the state first. Do not rely on it for anything else.)\n- `saveFrameToPng` writes asynchronously and can report success with a cached frame from an earlier\n  render. Do not call it in `ae_run_jsx` and read the file at once. Use `ae_snapshot_frame`: the server\n  waits for the PNG to be non-empty and stable, checks its modified time is newer than the request,\n  retries a stale one once with a +0.001 s nudge, and reports `stale_frame` if still stale. If you must\n  render in your own code, check the file is non-empty and newer than your request and retry once.\n- Custom-data effect parameters (such as Colorama\'s Output Cycle) cannot be read or set by script.\n\n## Never abort, never loop\n\n- Do not give up on a slow `ae_run_jsx` and send it again. The server never aborts an evalScript,\n  because that wedges the ExtendScript bridge until AE restarts. Calls queue and wait.\n- If the 120 s limit passes, the call returns `kind: "timeout"`. For a mutating call: `outcome:\n  "unknown"`, the op is quarantined, and every other write is refused until you inspect the state with\n  read tools and call `ae_acknowledge { op_id, note }`. The script may still be running in AE.\n- If AE is busy (a popup, someone else\'s script, a render) a call is refused at once with\n  `kind: "queued"` and `actual.busy`, before anything is sent. Read the popups with `ae_dialogs`,\n  call `ae_status` (it answers at once), and wait about 30 s. Do not retry in a loop.\n- Calls wait their turn in one queue (reads and writes alike) for up to 600 s, then are dropped with\n  `kind: "queued"`: nothing ran.\n\n## The safety lint\n\nBefore ES3 is checked, a static lint reads the code (with comments, strings and regex literals blanked,\nso `"alert"` in a string does not trigger it). A hit refuses the whole call, nothing runs, and the\nmessage names the line, the member and the tool to use instead.\n\n| Refused | Use instead |\n|---|---|\n| `system.callSystem`, `File.execute`, sockets, `.queueInAME` | nothing: no outside programs |\n| `$.evalFile`, `#include`, `//@include` | `ae_skill_run` (a saved skill\'s steps) |\n| `$.sleep` | nothing: it blocks the bridge |\n| `alert`, `confirm`, `prompt`, `Window.alert` / `confirm` / `prompt`, `File.openDialog`, `saveDialog`, `Folder.selectDialog`, `.openDlg`, `.saveDlg`, `.selectDlg`, `.saveWithDialog`, `.importFileWithDialog` | `ae_ask_user` (questions), `ae_import_footage` (import) |\n| `ScriptUI`, `new Window` | nothing: no windows inside After Effects |\n| `app.beginSuppressDialogs` | `ae_dialogs`. Popups are read and answered, never hidden. |\n| `app.quit`, `app.restart`, `app.scheduleTask`, `app.watchFolder`, `app.exitAfterLaunchAndEval`, `deletePref` | nothing |\n| `app.newProject`, `app.open`, `app.openFast`, `project.close` | `ae_project_session` |\n| `project.save()` (also via a variable holding `app.project`) | `ae_save` (`save_as: { path }` for another file) |\n| `renderQueue.render`, `pauseRendering`, `stopRendering`, `.onStatusChanged` | `ae_render_queue_render` or `ae_aerender_start` |\n| `app.purge` | `ae_memory_purge` |\n| `File` or `Folder` `remove`, `rename`, `copy`, `create`, `write`, `writeln`, or `open` for writing (also `item.file.remove()`) | nothing: tools write their own files |\n| Team Project methods | nothing |\n\n- With `mutates: false` it also refuses writes: `setValue`, `setValueAtTime`, `addProperty`, `addKey`,\n  `removeKey`, `remove`, `duplicate`, `moveTo`, `layers.add`, `items.add`, `addSolid`, `addText`,\n  `addComp`, `applyPreset`, `replaceSource`, `importFile` and similar. Set `mutates: true` and `expect`.\n- `File.open` with a literal `"r"` mode (or no argument) is allowed, for reading. A mode that is not a\n  string literal is refused because it cannot be checked.\n- **It is a guard rail, not a sandbox.** `eval()` of a built string, `obj["callSystem"]`, aliasing a\n  method (`var f = system.callSystem`) and files reached through a chain it cannot follow all get past\n  it. Do not try. You remain responsible for what the code does, and the user\'s rules (no outside\n  programs, no files written, no dialogs, no suppressed popups) apply whether or not the lint sees it.\n- Do not edit the code to dodge a refusal. If the lint names a tool, use the tool. If it says "nothing",\n  tell the user that this MCP does not do it.\n\n## Examples\n\nA read. It changes nothing, so `mutates` is false and `expect` is not needed.\n\n```\nae_run_jsx {\n  "label": "Count layers per comp",\n  "mutates": false,\n  "code": "var out = [];\\nfor (var i = 1; i <= app.project.numItems; i++) {\\n  var it = app.project.item(i);\\n  if (it instanceof CompItem) out.push({ id: it.id, name: it.name, layers: it.numLayers });\\n}\\nreturn out;"\n}\n```\n\nA guarded write. `project_path` comes from `ae_status`; `comp_id` makes the receipt cover that comp.\n\n```\nae_run_jsx {\n  "label": "Dim background layers to 40%",\n  "mutates": true,\n  "expect": { "project_path": "D:/jobs/promo/promo.aep", "comp_id": 7 },\n  "idempotency_key": "dim-bg-comp7-v1",\n  "code": "var comp = app.project.itemByID(7);\\nif (!comp || !(comp instanceof CompItem)) { throw new Error(\'comp 7 not found\'); }\\nvar changed = 0;\\nfor (var i = 1; i <= comp.numLayers; i++) {\\n  var layer = comp.layer(i);\\n  if (layer.name.indexOf(\'BG\') === 0) {\\n    layer.property(\'Transform\').property(\'Opacity\').setValue(40);\\n    changed++;\\n  }\\n}\\nreturn { changed: changed };"\n}\n```\n\nThen, in a separate call, read back what you care about (`ae_get_layer_props`, or a second\n`ae_run_jsx` with `mutates: false`). The `receipt` in the write result already lists what differs.\n\n## Checklist before sending\n\n1. Is there a dedicated tool? (`ae_search_tools`.)\n2. `var` and `function` only, loops not iterators, `if / else` not chained ternaries.\n3. `return` the data you need, as plain objects.\n4. `mutates: true` plus `expect` if anything changes; a `label` the user will recognise in Edit > Undo.\n5. No undo group, no dialog, no file, no save, no render call in the code.\n6. One short call. Verify in a second call. Never resend after a timeout or an `unknown` outcome.\n'
+  },
+  "ae-fonts": {
+    "SKILL.md": '---\nname: ae-fonts\ndescription: "Find, check and replace fonts in After Effects with the chroma-ae MCP (ae_fonts), and deal with the font warnings. Load for: missing font, font substitution, substituted font, replace font, swap a font project-wide, which fonts does this project use, is this font installed, does the font have the glyphs (Turkish, Cyrillic, Arabic), Unknown BIB Error, cannot access font, ATM Parse Error, CoolType, Adobe Fonts not syncing, duplicate or damaged fonts, a popup that blocks scripts after a font change, ae_busy with a font popup."\nmetadata:\n  version: "1.0.0"\n---\n\n# Fonts in After Effects\n\nEverything here is done with the `ae_fonts` tool, plus `ae_dialogs` and `ae_dialog_respond` for the\nfont warnings. Fonts are a project read first, a write last: find out what the project uses, check\nwhat is installed, then change.\n\n## Reaching the tools\n\n`ae_dialogs` and `ae_dialog_respond` are core tools: always listed. `ae_fonts` is **not** core. It sits\nin the `text` group, so on the default (core) toolset reach it through the three meta-tools:\n\n- `ae_search_tools { query: "fonts" }` (or `group: "text"`) to find it.\n- `ae_get_tool_schema { name: "ae_fonts" }` for the full schema and safety text. Read it before first use.\n- `ae_invoke_tool { name: "ae_fonts", arguments: { ... } }` to call it. Everything below goes under `arguments`.\n\nIf the full list is loaded (HTTP header `X-Chroma-Toolset: full`, or `CHROMA_AE_MCP_TOOLSET=full` for\nthe relay) call `ae_fonts` directly. `ae_search_tools` and `ae_get_tool_schema` never touch After\nEffects, so they work even while AE is blocked by a popup. `ae_invoke_tool` does not: it is refused\nwhile AE is rendering and answers "busy" while a popup holds AE.\n\nOther tools used here: core `ae_status`, `ae_get_project`, `ae_save`, `ae_set_text`, `ae_find_layers`;\nreached the same way as `ae_fonts`: `ae_auto_checkpoint`, `ae_checkpoint_revert` (group `safety`),\n`ae_brief` (group `review`), `ae_collect_relink` (group `delivery`).\n\n## ae_fonts actions\n\n`action` is one of `in_use` (the default), `search`, `check`, `replace`, `check_files`. All except a\nreal `replace` are read-only. Needs AE 24 or later (`app.fonts`); `replace` needs 24.5; glyph checks\nneed 25.1. On an older AE the result says so (`available: false` with a `reason`) instead of failing.\n\n### in_use: what the project uses\n\nParameters: `comp_id` (only that comp\'s text layers; default the whole project), `missing_only`\n(true: list only fonts known to be missing or substituted).\n\nResult: `fonts[]`, one per PostScript name, each with `font` (the PostScript name), `family`, `style`,\n`location`, `missing` (true, false, or null when AE could not say), `uses` and `layers[]` (comp_id,\ncomp, layer_index, layer, and `key` for a keyframe of animated source text). Also `missing[]`,\n`missing_known` (false when any font\'s state is unknown), `text_layers`, `partial`, `truncated` and\n`skipped_layers` (text layers that could not be fully read, each counted once).\n\nCheck `missing_known` before saying "no fonts are missing". With `missing_only`, fonts whose state is\nunknown are left out and counted in `unknown_state`, with a `note`: they may still be missing.\n\n### search: what is installed\n\nParameters: `query` (matches PostScript, family, style or full name, or their native names; case,\nspaces and dashes ignored), `family` (contains), `style` (contains, such as "bold"), `writing_script`\n(roman, cyrillic, greek, arabic, hebrew, japanese, chinese_simplified, ...), `variable_only`,\n`adobe_only`, `page` (from 1), `page_size` (default 25, at most 100).\n\nResult: `fonts[]` with names, location, Adobe Fonts flag and variable axes; `total_matches`,\n`has_more`, `scanned`, `scan_truncated`, `font_ids_session_only: true` (a `fontID` is valid for this\nAE session only; never store it). The server walks the whole font list in short steps, up to a\nminute. If `scan_truncated` is true a font that is not listed may still be installed: narrow the\nsearch, or confirm one name with `check`. Do not conclude "not installed" from a truncated scan.\n\n`writing_script` says what the font supports in general. Whether it has the letters of a given\nstring is a glyph question: use `check` with `text`.\n\n### check: does this font exist, is it substituted, does it cover this text\n\nParameters: `fonts` (required, 1 to 50; each a PostScript name string such as `"Arial-BoldMT"`, or\n`{ family, style }`), `text` (the real string to be shown, up to 20000 characters).\n\nResult: `checked[]` per font with `exists`, `is_substitute`, `duplicates`, `candidates` (near matches\nfor a font that does not exist), `other_fonts_with_same_dict` where AE gives it, `variable` axes for a\nvariable font and, with `text`, `glyphs` (`supported`, `missing` characters, `suggested_default`:\nAE\'s default font for the script of what is missing). Also `project_missing_or_substituted` (AE\'s own\nlist) and a `problems` count: fonts that do not exist, are substituted, or lack glyphs.\n\nAlways pass the real text when the font is for a language with special letters (for example a\nTurkish caption). A font can exist and still draw boxes for some characters.\n\n### replace: swap one font for another, project-wide\n\nParameters: `from` and `to` (both required; PostScript name or `{ family, style }`), `dry_run`\n(default **true**), `no_font_locking` (default false), `expect` (required when `dry_run` is false:\n`{ project_path, comp_id? }`, where `project_path` is the open .aep\'s absolute path, or\n`"<unsaved>"`).\n\n`from` may be a font that is missing: the project\'s own used-font list is searched for it, not the\ninstalled list. `to` must be installed and must not itself be substituted (`font_not_found` or\n`font_substituted` otherwise).\n\nDry run (the default) changes nothing. It returns `from_used`, `affected_layers`, `uses`, `layers`\n(where the old font is used), `glyphs` (layers whose text the new font cannot draw, with the missing\ncharacters) and `notes`. If `from_used` is false there is nothing to replace.\n\nReal run (`dry_run: false`, with `expect`):\n1. It is **not undoable**: Ctrl+Z does not restore it. The server makes a checkpoint first and\n   refuses (`error: "checkpoint_required"`) if none can be made, or if the project has unsaved\n   changes, because a checkpoint copies the saved .aep. Run `ae_save`, and turn automatic\n   checkpoints on with `ae_auto_checkpoint`, then try again.\n2. It calls AE\'s `Project.replaceFont`, then reads the project\'s used fonts back and compares: the\n   old font must be gone, the new one present and not substituted, and every place that used the old\n   font must now use the new one. A failed check comes back as a mismatch on the result.\n3. To undo, restore from the checkpoint with `ae_checkpoint_revert` (this loses edits made since).\n\n`no_font_locking: true` stops AE locking glyphs, so missing glyphs can no longer be detected; leave\nit off unless the user asks. In text with mixed fonts, only the ranges that used the old font change.\nThe check runs on the layer\'s whole text, so a mixed-font layer can list characters the replaced\nrange does not contain.\n\n### check_files: are the font files themselves sound\n\nNo parameters. The host lists every installed font with its file path; the server then checks each\nfile on disk (about 2 s for 800 fonts). Result: `fonts`, `files`, `adobe_fonts`, `problem_fonts`,\n`problem_counts`, `problems[]` (names, `location`, `problem`, `detail`; at most 200), `without_file`,\n`scan_truncated`, `seconds` and a `note` with the fix steps.\n\n`problem` is one of `no_location`, `missing` (file deleted, moved, or on a drive not connected),\n`not_a_file`, `empty` (0 bytes), `unreadable`, `not_a_font` (a .ttf, .otf, .ttc or .otc file whose\nfirst bytes are not a font header; not tested for Adobe Fonts files). Fonts with no file at all are\nlisted under `without_file` and are normal: named instances of a variable font and Windows bitmap\n.fon fonts. They are not problems.\n\n## Order of work\n\n1. `in_use` (add `comp_id` to narrow it). Note `missing`, `missing_known`, `skipped_layers`.\n2. `check` the fonts the brief or the user wants (`ae_brief` holds the brief\'s fonts), with `text`\n   when the copy has special characters.\n3. `search` for an installed stand-in when a font is missing: same family first, then by `style`,\n   then by `writing_script`. Use `adobe_only` to see which fonts are Adobe Fonts.\n4. `replace` with `dry_run` true. Read `affected_layers` and `glyphs`. Show the user a font that\n   lacks glyphs for their text before going on.\n5. `ae_save`, then `replace` with `dry_run: false` and `expect`.\n6. Read back in a separate call: `in_use` again (or `ae_find_layers` and a snapshot for a visual\n   check). Do not trust the write\'s own result as the only evidence.\n7. `check_files` only when the BIB warnings appear (below), or before a delivery on a new machine.\n\nSetting fonts on new text: `ae_set_text` (and caption tools) look the font up first on AE 24+ and\nrefuse an unknown or substituted font with near matches. Do not pass `allow_substitute: true` just to\nget past that refusal: it writes a name AE will then replace with a fallback.\n\n## How AE substitutes\n\nWhen a project asks for a font that is not installed, AE keeps the font\'s name in the text but draws\nwith a fallback. `in_use` shows it as `missing: true`. A substituted `from` font can still be\nreplaced, because `replace` finds it by what the project uses. Match fonts by PostScript name\n(`Arial-BoldMT`), not by display name: family and style names differ by language and foundry, and\n`{ family, style }` is matched with case, spaces and dashes ignored, which can match more than one\nfile. If `check` reports `duplicates` above 0, two installed fonts answer to the same name: say so to\nthe user before choosing.\n\n## Unknown BIB Error. cannot access font / ATM Parse Error\n\nAE can open a popup, "Unknown BIB Error. cannot access font", or an "ATM Parse Error". They come from\nCoolType, Adobe\'s font engine, and appear:\n- at the first full font load in a session (the first time something reads the whole font list,\n  for example a font search or a font scan), and\n- again after any font is installed, removed or changed while AE is open.\n\nThe popup **names no font**. Known causes, none of which this server can see directly:\n- the same font installed twice with different files (for example a per-user and a system copy);\n- a font Windows cannot tell from its siblings: same family, weight and italic flags;\n- a second copy of a font AE ships itself, such as Adobe Clean or Adobe Clean UX, installed by a\n  font manager;\n- damaged font files;\n- Adobe Fonts activated while Creative Cloud is not running.\n\n### What the server does with the popup\n\nThe popup blocks scripts: until it is answered, AE-touching tools wait, or fail with "After Effects\nis busy: a popup is open ..." and tell you to read `ae_dialogs`. The panel\'s watcher also reads new\npopups. A one-button OK popup raised by one of our own operations is pressed at once and reported on\nthe next tool result under `popups`; anything else is put to the user in the panel (and in the\nclient too, for a client on an older MCP revision that declared elicitation). Popups are never\nsuppressed.\n\nWhat you do:\n1. Do not retry in a loop. Call `ae_status` (it answers at once) and `ae_dialogs` (read-only).\n2. If the popup was caused by your own operation (`caused_by_op`), answer OK with\n   `ae_dialog_respond` using the handle from `ae_dialogs`. List it first; it is re-read before the\n   key is pressed. Otherwise ask the user.\n3. Tell the user what it said. It will come back, because the cause is still there.\n4. Run `ae_fonts` action `check_files`. If AE shows the warning again while it runs, it is caused by\n   that call (`caused_by_op` is set): the watcher usually presses OK itself; if it is still open,\n   answer OK with `ae_dialog_respond` as in step 2.\n\n### Diagnosis with what the tools can see\n\n`check_files` finds **file** problems: missing, empty, unreadable or non-font files. It cannot see\nduplicate installs, sibling fonts with identical family, weight and italic flags, a second copy of\nan Adobe-bundled font, damage inside an otherwise valid file, or Adobe Fonts sync state. So:\n- `problem_fonts` above 0: report each font by `postscript` and `location`, with its `problem` and\n  the fix in `note`.\n- `problem_fonts` 0: say that no file is broken (it does not clear the fonts), and move to what only\n  the person can check. `note` says so too. Use `search` with `family` and `check` (`duplicates`,\n  `other_fonts_with_same_dict`) to list candidates: two entries with the same family and style, or\n  `location` in two folders. Names starting "Adobe Clean" in a user font folder are suspect.\n- If `adobe_fonts` is above 0 and the warning appears at AE start, ask whether Creative Cloud was\n  running.\n\n### What needs the person\n\nYou cannot install or remove fonts, empty font caches, or restart AE; `ae_run_jsx` is linted against\nfile deletes and quitting. Ask the user to:\n- remove or reinstall the fonts you listed (Windows: Settings, Personalization, Fonts; macOS: Font\n  Book), and remove the duplicate or the second copy of an Adobe font;\n- for an Adobe Fonts font, switch it off and on again in the Creative Cloud app, with Creative Cloud\n  running;\n- with AE closed, delete Adobe\'s font cache files `AdobeFnt*.lst` (Windows: under\n  `%LOCALAPPDATA%\\Adobe\\TypeSupport` and the CT Font Cache folders under `%APPDATA%\\Adobe`); AE\n  rebuilds them on start;\n- **restart AE** after any font change. Fonts changed while AE is open raise the warning again, and\n  AE\'s list may be stale. After the restart, read again with `in_use` and `check`.\n\nSave the project before asking for a restart (`ae_save`).\n\n## Rules of thumb\n\n- Never call a font "missing" from `search` alone, or from `in_use` while `missing_known` is false.\n- Never run a real `replace` without a dry run first, a saved project and a checkpoint.\n- Do not answer a popup you did not cause, or any popup whose OK talks of replacing, losing or\n  erasing, without the user. `ae_dialog_respond` refuses it without `allow_destructive` and a\n  `user_instruction`.\n- Tell the user which fonts changed, how many layers, and what the glyph check said.\n'
+  },
+  "ae-live-session": {
+    "SKILL.md": '---\nname: ae-live-session\ndescription: "How to work in After Effects through the chroma-ae MCP while a person is editing the same project live: inspect before writing, target guards (expect), checkpoints and undo, write outcomes (applied, no_op, not_applied, unknown) and the quarantine, idempotency keys, the single-writer queue and busy or Stop refusals, popups and the dialog rules (ae_dialogs, ae_dialog_respond), asking the user (ae_plan, ae_ask_user), long renders (render queue, aerender, render lock, the AE 26.3 render hang), and saving. Load at the start of any session that changes an open After Effects project, after a timeout, busy, queued, guard or Stop refusal, when a popup appears, before starting a render or saving, or when the user says they are working in After Effects at the same time."\nmetadata:\n  version: "1.0.0"\n---\n\n# Working in After Effects beside a person\n\nThe user is probably editing the same project while you work. They can move a layer, open a dialog\nor press Stop at any moment. The server is built for that: every write is guarded, checkpointed and\nread back. Your job is to keep its assumptions true: look first, change one thing at a time, say\nwhat you did, and stop when the state is not what you thought.\n\n## Which tools are close at hand\n\nCore tools (always in the list) include `ae_plan`, `ae_status`, `ae_get_project`, `ae_get_comp`,\n`ae_comp_tree`, `ae_get_layer_props`, `ae_find_layers`, `ae_get_keyframes`, `ae_set_property`,\n`ae_batch_set`, `ae_set_text`, `ae_create_layer`, `ae_create_comp`, `ae_layer_ops`,\n`ae_import_footage`, `ae_add_effect`, `ae_set_effect`, `ae_save`, `ae_snapshot_frame`, `ae_run_jsx`,\n`ae_dialogs`, `ae_dialog_respond`, `ae_skill_run`, `ae_render_queue_add`, `ae_render_queue_edit`,\n`ae_render_queue_status`, `ae_render_queue_render`, `ae_render_queue_render_status`,\n`ae_aerender_start`, `ae_aerender_status`, and the three meta-tools.\n\nNot in the core list, so reach them with `ae_search_tools { query }` or `{ pattern: "^ae_checkpoint" }`,\nthen `ae_invoke_tool { name, arguments }` (full schema from `ae_get_tool_schema { name }`):\n`ae_session_changes`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`,\n`ae_auto_checkpoint`, `ae_comp_fingerprint`, `ae_comp_diff`, `ae_recent_ops`, `ae_quarantine_status`,\n`ae_acknowledge`, `ae_ask_user`, `ae_project_session`, `ae_verify_render`. Clients on the full toolset\n(HTTP header `X-Chroma-Toolset: full`, or `CHROMA_AE_MCP_TOOLSET=full` for the relay) see all of them\nlisted; some appear there as one tool with an `action` field (`ae_checkpoint { action: "create" |\n"list" | "revert" }`). The old names still work.\n\n`ae_search_tools` and `ae_get_tool_schema` never touch After Effects, so they answer while it is busy.\n\n## 1. Inspect before you write\n\n1. Start a new task with `ae_plan { request, intent?, comp_id?, layers?, answers? }`. It reads the open\n   project once and returns what it took the request to mean, questions whose answers change the work,\n   a plan with a tool per step and hazards. Whether you ask the questions or use its stated defaults\n   follows the user\'s "Ask first" button in the panel; the result says which.\n2. `ae_status` gives the open project\'s path (`"<unsaved>"` if never saved), the dirty flag, the active\n   comp, selected layers and the quarantine list. `detail: true` adds the Project panel selection, the\n   time, selected properties and warnings. Selection can change between this read and your write, so\n   act on explicit ids and indexes, not on "the selected layer".\n3. Read what you will touch: `ae_comp_tree`, `ae_find_layers`, `ae_get_comp`, `ae_get_layer_props`\n   (`meta: true` for what a property accepts), `ae_get_keyframes`. Read tools change nothing, not even\n   time or selection.\n4. After your first write, `ae_session_changes` (or the `user_changed` line on each later write result)\n   tells you what the user changed since your last write: another project open, items added or\n   removed, layers added or edited, selection or work area changed, a restart. If it says anything\n   changed, re-read before writing. `rebase: true` moves its baseline to now. Before your first write\n   there is no baseline.\n5. Every write names its target: `expect: { project_path, comp_id? }`, copied from `ae_status`. If AE\n   has something else open, the write is refused with `kind: "guard"` and nothing changes. A guard\n   failure means stop and re-read, never retry with the same expectations.\n\n## 2. Checkpoints and undo\n\n- **Automatic.** Before each write the server copies the saved `.aep` to\n  `<projectdir>/_mcp_checkpoints/<name>_<stamp>_auto-<tool>.aep` and puts it in the result as\n  `checkpoint`. It is the last save. If the user has unsaved work, `checkpoint.unsaved_changes_not_included`\n  is true and the copy lacks it. Writes between two saves share one copy. Unsaved projects and files\n  over 250 MB are skipped (`ae_auto_checkpoint { enabled?, max_mb? }`; change it only if the user asks).\n- **Manual.** `ae_checkpoint_create { expect, label? }` before something large. `ae_checkpoint_list\n  { expect }` lists them.\n- **Receipts.** Each write returns a `receipt` read back in a separate call: what differs before and\n  after. A mismatch in it means the write did not do what you meant. `ae_comp_fingerprint { comp_id }`\n  (returns an `id`) then `ae_comp_diff { before_id }` show every changed property for a stretch of work.\n- **One undo step per call.** The user\'s Ctrl+Z (Cmd+Z on macOS) takes back a whole tool call. Saves,\n  project open and close, renders and font replacement have no undo step.\n- **Prefer the checkpoint to asking the user to press Ctrl+Z.** AE exposes no undo history, so\n  `ae_session_changes` can only say an undo step is "not_reachable" (provably gone) or "possibly_reachable".\n- `ae_checkpoint_revert { expect, checkpoint_path, discard_changes? }` opens the checkpoint file itself.\n  It refuses when the project has unsaved changes unless `discard_changes: true`: that throws the user\'s\n  work away, so ask first. Saving afterwards overwrites that checkpoint; make a new one if you need it.\n\n## 3. Write outcomes\n\nEvery write result has `ok` and, for writes, `outcome`:\n\n| `outcome` | Meaning | What you do |\n|---|---|---|\n| `applied` | It ran and was read back. | Check `receipt`. Tell the user in a line. |\n| `no_op` | It ran and changed nothing (already the way you asked). | Do not repeat it. |\n| `partial` | Part of a batch applied (`ae_batch_set`: earlier ops or chunks applied, a later one failed; see `done` and `failed_chunk`). | Do not rerun the whole batch. Re-read state and send only what is left. |\n| `not_applied` | Refused before anything changed: invalid arguments, a failed guard, quarantine, a busy or queued refusal. | Fix the cause (the message names it), then call again. |\n| `unknown` | The call timed out or failed after sending. Part of it may be in the project. | Never resend. Read state, then decide. |\n\n`next_steps` in a result is a list of what to do next (for `unknown`: read the state with `ae_comp_diff`\nor the read tools, one Ctrl+Z removes the call\'s undo group, the checkpoint holds the project as it\nwas). Follow it.\n\n**The quarantine.** A write that times out is quarantined and every other write is refused (`kind:\n"quarantined"`) until it is cleared. Reads still work. To clear it: `ae_status` (lists it), inspect the\nproject with read tools, then `ae_acknowledge { op_id, note }` where `note` says what you found. A write\nthat was in flight when AE or the panel service went down is quarantined the same way and shown by\n`ae_session_changes`. Nothing is retried automatically. `ae_recent_ops` lists the last 200 writes with\ntheir outcomes, so after a lost reply you can see whether one ran.\n\n## 4. Idempotency keys\n\nGive every write a fresh `idempotency_key` (a string up to 128 characters, such as `"dim-bg-comp7-v1"`).\nEvery tool that takes `expect` or checkpoints has it, ae_run_jsx and ae_skill_run included.\n\n- Same key, same arguments, same client and same project: the second call returns the first answer with\n  `idempotent_replay: true` and `first_called_at`, and does not run again. If the first is still running,\n  the second waits for it.\n- Same key with different arguments: refused with `code: "idempotency_key_reused"`, `outcome:\n  "not_applied"`. Use a new key for a new write.\n- A result that changed nothing (`not_applied`, a guard, queued or quarantine refusal, invalid\n  arguments) is not kept, so sending it again after fixing the cause runs it. Anything else is kept,\n  an `unknown` result included: resending it gets the same `unknown` back. That is deliberate.\n- Keys are scoped to the tool, the client and `expect.project_path`; at most 200 are kept, for one hour.\n- Name keys after what the write does. A reused name in another project is a new write.\n\n## 5. Busy, queued and Stop\n\n- **One writer.** The server runs one operation at a time, reads and writes alike, in order. A call\n  that waits more than 600 s is dropped with `kind: "queued"` and nothing ran. Wait for your own call\n  to finish before sending the next.\n- **Busy.** If a popup, someone else\'s script or a manual render has held AE for 15 s or more, calls\n  are refused at once with `kind: "queued"` and `actual.busy` (`cause`: `rendering`, `dialog_open`,\n  `script_running` or `unknown`; the popups; `next_steps`). Nothing was sent. Read the popups with\n  `ae_dialogs`, tell the user what holds AE, and call `ae_status` (it answers at once, with `busy`) after\n  about 30 s. Never retry in a loop.\n- **Timeouts.** A call waits 120 s for AE. On timeout the call is not cancelled: it may still be running\n  or may have finished. A timed-out write is `unknown` and quarantined (section 3). Later calls are\n  refused as busy until AE finishes it.\n- **Stop.** The panel has a Start/Stop button at the top. While the user has stopped it, every call is\n  refused before it reaches AE, with `kind: "queued"` and a message that starts "The user stopped the MCP\n  in After Effects". Calls waiting in the queue are refused too; the one already running finishes.\n  Tell the user in one line, stop calling tools, and wait until they say they have pressed Start. Do not\n  retry. Reads are refused as well, so verify state after Start, before any resend of a write.\n\n## 6. Popups\n\nAE shows modal popups (missing fonts, overwrite warnings, "file not found"). They block its scripting\nthread. Popups are never suppressed.\n\n- **The watcher.** The panel service watches for them. A popup raised by your own call with one OK-like\n  button is pressed at once, because your call would wait on it. Progress windows (Cancel or Stop only)\n  are left alone. Any other popup is put to the user in the panel ("After Effects asks", with a\n  screenshot and its buttons), and in the client too when the client takes questions (section 7).\n- **Reports.** What happened is added once to your next tool result as `popups`: `pressed_for_you`,\n  `answered_by_user`, `closed_in_after_effects` or `open` (with `handle`, `buttons`, and buttons marked\n  `only_in_after_effects` that the user must click). Tell the user in a line what each popup said and\n  what was pressed. For a missing font offer `ae_fonts` with `check_files`; for missing files,\n  `ae_collect_relink`.\n- **`ae_dialogs`** lists open popups (read-only): `handle`, `title`, `text`, `buttons`, `screenshot`,\n  `caused_by_op`, `kind` (`info`, `question`, `destructive`; advisory). Look at the screenshot when\n  unsure. Call it when a call timed out or came back busy.\n- **`ae_dialog_respond { handle, button, reason, check?, allow_destructive?, user_instruction? }`.**\n  `reason` is always required: say why you answer and why that button.\n  - `caused_by_op` null (the popup is not from your own running call): refused (`refused_not_caused_by_our_op`)\n    unless `user_instruction` quotes the user\'s words.\n  - A destructive button (Save, Don\'t Save, Replace, Delete, Overwrite, Discard, Remove, Revert) needs\n    both `allow_destructive: true` and a `user_instruction` quoting the user (`refused_destructive_button`).\n    OK or Yes on a popup whose text is about replacing, overwriting, deleting or losing something needs\n    the same (`refused_destructive_dialog`).\n  - On a popup AE paints itself, only Cancel, No or Close (sent as Escape) and the default OK, Yes or\n    Continue (sent as Enter) can be pressed. Other buttons return `button_not_default` or\n    `button_not_answerable`: ask the user to click them. `dialog_changed` and `dialog_gone` mean read again.\n  - If `closed` is false, nothing else is tried; ask the user.\n  - Every answer is logged. Tell the user what you dismissed and what it said.\n\n## 7. Asking the user\n\n- `ae_plan` says up front which choices are the user\'s. Ask when a choice changes the look, the timing\n  or the files (which variant, which easing, where to save), not for routine ones.\n- `ae_ask_user { question, options (2 to 8, each id and label), kind?, multi_select?, allow_other?,\n  context?, wait_seconds? }` asks in the Chroma AE MCP panel and waits (default 120 s, at most 600). Show\n  rather than describe: give each option an `image_path` (a PNG or JPEG from `ae_snapshot_frame`), or\n  `kind: "ease"` with a `curve` per option. Results: `answered`, `dismissed`, or `waiting` with an\n  `ask_id`. For `waiting`, call again with `{ ask_id }` to keep waiting; the question stays in the panel.\n  If dismissed, go on with a sensible default and say which. Ask one thing at a time.\n- If the client declared the `elicitation` capability at `initialize` (MCP revisions up to 2025-06-18),\n  a plain single choice with no pictures is asked in the client\'s own prompt (`via: "elicitation"`).\n  A client on MCP 2026-07-28 is never asked in its own prompt (that revision has no server-to-client\n  requests), and ease curves, several answers and pictures are always asked in the panel. Do not\n  assume the user sees it in the chat: say in the chat that you have asked in the After Effects panel.\n\n## 8. Long renders\n\n- **Do not block on a render.** Both render tools return at once with a job id. Poll the status tool;\n  `wait_seconds` (0 to 30) waits for a change, so one call replaces several polls. The status tools never\n  touch AE.\n- **Prefer `ae_aerender_start`** (a separate background process; AE stays free). It needs a saved,\n  non-dirty project, so ask the user to save first. One aerender job runs at a time and a new one starts\n  at least 20 s after the last. Follow it with `ae_aerender_status { wait_seconds }`.\n- **`ae_render_queue_render`** is AE\'s own render. Tell the user first: AE is locked for the whole render,\n  the user cannot work in it and cannot reach Stop (measured). It is for when aerender cannot be used, or\n  for a project that is unsaved or has unsaved changes (it renders it as it is now); on a dirty project\n  ask the user to save first all the same, because the render cannot be stopped. Keep these renders short. While it runs, every tool that needs AE is refused\n  at once with `kind: "queued"`. `ae_render_queue_render_status`, `ae_dialogs`, `ae_dialog_respond` and\n  `ae_status` still answer. If the lock does not clear after AE stops rendering, restarting AE clears it,\n  or the user presses "Clear render lock" in the panel. Never ask the user to press Render themselves.\n  Media Encoder only with `engine: "media_encoder"` and `user_confirmed: true`, after asking.\n- **An existing output file** is refused unless `overwrite: true`. After Effects then asks to overwrite,\n  and answering OK is destructive: it needs the user\'s instruction.\n- **Check the output** with `ae_verify_render` on one real file or frame once the job ends.\n- **The AE 26.3 render hang** (`render_hang_env_light`). On AE 26.3, an Advanced 3D comp whose environment\n  light takes its image from a layer, with another 3D layer, never finishes rendering. `ae_snapshot_frame`\n  and the frame tools built on it refuse it before anything renders, and `ae_plan` lists it as a hazard.\n  Tell the user: to render a frame, clear that light\'s Source (Light Options) or switch the light off for\n  the check. The comp was not changed; do not change it for them. If a frame was never written\n  (`frame_not_written`), frame renders are refused (`frame_render_pending`) until it appears or AE is\n  restarted: tell the user to save (`ae_save`) and restart After Effects.\n\n## 9. Saving\n\nSave only when the user asks, or when a tool needs a saved project and you have asked them. A save\noverwrites their file, and it changes what the next checkpoint captures.\n\n- `ae_save { expect, backup?, save_as?, increment? }`. By default it first copies the file on disk to\n  `<projectdir>/_mcp_backups/<name>_<stamp>.aep`. `save_as: { path, overwrite? }` is the only way to\n  save an untitled project; it points the open project at the new file and leaves the old file and its\n  checkpoints where they were. `increment: true` saves as the next free `_vNNN` and never overwrites.\n- Never call `project.save()` in a script (the safety lint refuses it), and do not save to "make a\n  checkpoint". Use `ae_checkpoint_create`.\n\n## Short rules\n\n1. Look, then write. Name the target in `expect`.\n2. One write at a time; wait for it.\n3. Give every write an `idempotency_key`.\n4. On `unknown`, a timeout or a quarantine: read, never resend.\n5. On busy, queued or Stop: tell the user, wait, do not loop.\n6. On a popup: read it, tell the user what it said, answer only under the dialog rules.\n7. Tell the user what you changed in a line. Mention the checkpoint when it matters.\n'
+  },
+  "captions": {
+    "NOTICE.md": "# Sources and licences\n\nThis skill is Chroma's own synthesis, written in its own words. Standards are cited by number\nand link; no style guide is quoted at length. Researched 2026-11-06.\n\n## Standards and guides (facts and numbers, linked)\n\n| Source | Used for |\n|---|---|\n| [Netflix English (USA) Timed Text Style Guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977-English-USA-Timed-Text-Style-Guide) | 20 / 17 cps, 42 characters, 2 lines, duration limits, SDH conventions |\n| [Netflix Subtitle Timing Guidelines](https://partnerhelp.netflixstudios.com/hc/en-us/articles/360051554394-Timed-Text-Style-Guide-Subtitle-Timing-Guidelines) | minimum gap, closing gaps, shot-change rules |\n| [BBC Subtitle Guidelines](https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/) | words per minute, line length, gaps, synchronisation, speaker colours |\n| [DCMP Captioning Key](https://dcmp.org/learn/597-captioning-key---text) | 32 characters, minimum and maximum duration, presentation rates |\n| [Ofcom TV access services](https://www.ofcom.org.uk/tv-radio-and-on-demand/information-for-industry/guidance/tv-access-services) | UK broadcast subtitling duties and quality expectations |\n| [W3C WCAG 2.2](https://www.w3.org/TR/WCAG22/) (1.2.2, 1.2.4, 1.4.3) | caption requirements and the 4.5:1 text contrast |\n| ITU-R BT.1359-1 | audio/video sync tolerances |\n\n## Skills and projects whose ideas were adapted\n\n| Source | Licence | Used for |\n|---|---|---|\n| [github/awesome-copilot: caption-qa](https://github.com/github/awesome-copilot) | MIT | the idea of a per-standard lint (cps, line length, duration, gaps), \"retime before rewording\", default-standard rule |\n| [vargHQ/skills: caption-styles](https://github.com/vargHQ/skills) | MIT | caption style families for social, and how they differ in chunk size |\n| [clueso-ai/skills: add-ai-captions, add-animated-captions](https://github.com/clueso-ai/skills) | Apache-2.0 | workflow order (transcribe, review, style, burn in) and animated word-highlight options |\n| [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes) (captions references and rules) | Apache-2.0, (c) HeyGen | Whisper failure modes (invented text over silence, `.en` models translating, over 20% music-note tokens), word grouping by energy, the plain-sidecar habit |\n| [Remotion captions](https://www.remotion.dev/docs/captions) | documentation, linked only | what `createTikTokStyleCaptions` does |\n\n## Ideas only (no licence stated in the downloaded copy; nothing copied)\n\n45ck/content-machine karaoke-ass-captions, AI-Builder-Club karaoke-captions, HUSS41N\nshorts-text-safe-zones, JosiahSiegel viral-video-animated-captions, appariciojunior captions,\nbrowser-use video-use, calesthio captions-media-accessibility, damionrashford ffmpeg-captions,\nkatareayush video-captions, lattifai omnicaptions, social-media-skills captions-and-clipping,\nvideo-db video-subtitles. Read for the shape of the problem (karaoke timing, safe zones, ffmpeg\nburn-in); every rule here was re-derived from the published standards above.\n\nA commercial caption product's marketing page was read for feature ideas only (word-level\nediting, per-standard checks). Nothing copied.\n\n## Numbers computed here\n\nContrast figures for a black box behind white text were computed with the WCAG relative\nluminance formula (`references/sdh-and-speakers.md` states the background they assume).\nPlatform UI zones are approximate, from ad specs and third-party templates.\n",
+    "SKILL.md": "---\nname: captions\ndescription: \"Make, check and ship captions and subtitles that meet a published standard: transcribe, chunk, time, break lines, style, QA and export. Use for captions, subtitles, SDH, closed captions, open captions, burn-in, SRT, VTT, WebVTT, TTML, IMSC, SCC, karaoke captions, word highlight, kinetic captions, social captions, TikTok / Reels / Shorts captions, transcript, transcribe, Whisper, ElevenLabs Scribe, reading speed, cps, line breaks, caption QA, safe zone, Netflix / BBC / DCMP / Ofcom standards, accessibility and WCAG, in After Effects (chroma-ae MCP), Premiere, Remotion, HyperFrames or any other tool. Trigger phrases: 'add captions', 'subtitle this', 'caption this reel', 'burn in subtitles', 'make an SRT', 'check these captions', 'too fast to read', 'TikTok captions', 'word by word captions', 'accessible captions'.\"\nmetadata:\n  version: \"1.0.0\"\n  sources: see NOTICE.md\n---\n\n# Captions\n\nOne skill for turning speech into captions that people can read, from a transcript to a delivered\nfile. The rules are numbers from published guides, so a caption can be measured, not admired.\nWritten in Chroma's own words; sources and licences are in `NOTICE.md`.\n\n**Load only what the task needs:**\n\n| Task | Read |\n|---|---|\n| Which limits apply; sources and links | `references/standards.md` |\n| Chunking, timing, gaps, line breaks, shot changes | `references/timing-and-breaks.md` |\n| Sound events, speakers, colours, music, contrast | `references/sdh-and-speakers.md` |\n| 9:16 reels, shorts, word highlight, platform zones | `references/social-and-platforms.md` |\n| Transcribing, Whisper and Scribe failure modes, clean-up | `references/asr.md` |\n| SRT, WebVTT, TTML/IMSC, SCC, sidecars, After Effects limits | `references/formats.md` |\n| Doing it with the chroma-ae MCP tools, Remotion, HyperFrames | `references/chroma-ae-workflow.md` |\n\nFor motion rules around captions (beats, keeping them out of the action), see\n`chroma-motion-director` (`references/sound-and-captions.md`). This skill owns the caption rules.\n\n## Pick the destination first\n\nNo target means no answer to \"are these captions OK?\". Ask, or state the default you used.\n\n| Destination | Standard | Notes |\n|---|---|---|\n| Netflix, streaming, most online video | Netflix English (adult) | the default when nothing is named |\n| Children's programmes | Netflix English (children's) | 17 cps instead of 20 |\n| UK broadcast and iPlayer-style delivery | BBC | words per minute, 37 characters broadcast |\n| US education, training, e-learning | DCMP Captioning Key | 32 characters, slower rates |\n| 9:16 social (TikTok, Reels, Shorts) | house social preset | short chunks, platform safe zones |\n| Legal or accessibility claim | WCAG 2.x plus the above | 1.2.2 (A) prerecorded, 1.2.4 (AA) live |\n\n## Key numbers\n\n| Rule | Netflix adult | Netflix kids | BBC | DCMP |\n|---|---|---|---|---|\n| Reading speed | 20 cps | 17 cps | 160-180 wpm (about 0.33 s a word) | 130-160 wpm by level |\n| Characters per line | 42 | 42 | 37 broadcast; online 68% of a 16:9 frame | 32 |\n| Lines | 2 | 2 | 2 | 2 |\n| Shortest caption | 20 frames at 24 fps (5/6 s) | same | not fixed | 40 frames |\n| Longest caption | 7 s | 7 s | not fixed | 6 s |\n| Gap between captions | 2 frames minimum | same | if a pause is left, 1 s or more (1.5 s better) | not fixed |\n\nFull table with links: `references/standards.md`.\n\nAlways:\n- Appear on speech onset (or a frame or two before); linger about 0.5 s after speech where space allows.\n- Two lines at most, bottom-heavy (the lower line longer) when both are needed.\n- Break at grammar, not at the character count (`references/timing-and-breaks.md`).\n- Colour is never the only cue for a speaker (colour-blind viewers, monochrome sets).\n- Text contrast 4.5:1 or better; a black box behind the text at 60% opacity or more (75% over busy footage).\n- Ship a plain sidecar (SRT or VTT) next to any burned-in version.\n- Review every name, number and brand word by eye. Speech-to-text gets them wrong with confidence.\n\n## The workflow\n\nSeven steps. In After Effects each maps to a chroma-ae tool (`references/chroma-ae-workflow.md`).\n\n1. **Destination and style.** Standard preset, caption kind (subtitle-style, phrase chunks, single\n   word), language, SDH or dialogue only.\n2. **Transcribe, or take the client's file.** Transcribing with Scribe sends the audio to a\n   third-party service: ask first. A supplied SRT or VTT skips this step.\n3. **Read the transcript.** Invented lines over silence or music, wrong language, lost\n   punctuation, names. Fix before chunking, not after (`references/asr.md`).\n4. **Plan against the standard, with cut times.** Chunk, break, time, merge, then list what\n   changed and what still violates. Give the planner the shot changes so it can respect them.\n5. **Review the plan.** Read the change list and every violation. A violation that retiming\n   cannot fix is a rewording decision for a human; never silently cut the speaker's words.\n6. **Write the captions** into the comp (layers, one layer, per word, or a template), inside the\n   platform safe zones, with a backing box if the footage is busy.\n7. **Check, export, look.** Read them back, lint against the standard again, export the sidecar,\n   then look at frames (first caption, a two-line caption, the fastest caption, a cut, the last\n   caption) at phone width. Say which checks were measured and which were only looked at.\n\n## Chunking modes\n\n| Mode | Shape | Use for | Avoid for |\n|---|---|---|---|\n| Subtitle-style | 1-2 lines, a full phrase, standard limits | dialogue, interviews, anything going to a platform or broadcaster | nothing; the safe default |\n| Phrase chunks | 2-4 words at a time, capped with `max_words` | punchy social edits, product films, explainers | fast speech with long sentences |\n| Single word | one word at a time | very short hooks and slogans (under about 8 words) | anything longer; fast speech |\n\nSingle-word display hurts comprehension: no word lands next to its neighbours, viewers who read\nahead lose the line, and fast speech flashes words for under 8 frames. Two to four words is the\nworking minimum for speech. Merge any word shorter than 8 frames into its neighbour. Keep numbers\nwith their units (\"40 per cent\", \"3 million\") and names together. Start a word highlight a frame\nor two early so it reads as in sync, not late.\n\n## Common mistakes\n\n- Using 42 characters per line for 9:16 social; a portrait phone line holds about 25 (`references/social-and-platforms.md`).\n- Burning in with no sidecar. Nobody can then fix a typo, translate, or search the text.\n- Trusting word timestamps to the frame; they drift 50-100 ms.\n- Ending a line on \"the\", \"of\", \"and\", \"to\", \"I\", or splitting a first name from its surname.\n- Captions over the platform UI (bottom 660-672 px, right-hand button column on 1080x1920).\n- Red and green speaker colours with no label.\n- Fitting the reading speed but ignoring the cut: a caption that straddles a shot change by two frames flashes.\n",
+    "references/asr.md": '# Speech to text\n\n## Which tool\n\n- `ae_transcribe` uses ElevenLabs Scribe. It uploads the audio to a third-party service. For\n  client audio, ask first, then pass `confirm_upload: true`.\n- Whisper (local, open) keeps audio on the machine. Choose it for confidential work.\n- A client-supplied SRT or VTT is better than either; use it and skip transcription.\n\n## Failure modes (read the transcript before using it)\n\n| Failure | Sign | Response |\n|---|---|---|\n| Invented text over silence or music (hallucination) | "Thank you.", "Thanks for watching", repeated lines, words starting inside a silent tail | drop words starting inside silence below about -35 dB for 0.6 s or more (`cleanup`) |\n| `.en` models translating non-English audio | English output for foreign speech | use a multilingual model and set the language |\n| Word timestamp drift | words 50-100 ms off the audio | nudge the whole track; do not trust the frame |\n| Word-level output loses punctuation and casing | a stream of lowercase words | restore from sentence-level output or a script, then chunk |\n| Music-note tokens | more than 20% of tokens are note symbols or `?` blocks | retry with a different or larger model, or take lyrics from the person |\n| Unspaced scripts (Chinese, Japanese) | a whole sentence as one word, wrong script | split into short phrases and spread the time by character count; check characters |\n| Names, numbers, brands | confident but wrong | always review by eye |\n| Speaker labels | missing or swapped | add by hand for SDH |\n\n## Clean-up options\n\n`ae_captions_plan` takes a `cleanup` option to drop non-word tokens, drop words inside trailing\nsilence, and merge fragments, and reports what it removed in the `CleanupReport`. It does not\ncheck spelling or meaning.\n\n## Review pass\n\nWatch it once with sound at normal speed with the captions on. Note: every proper name, every\nnumber, every place the caption disagrees with what was said, every caption on screen over music\nor silence. Fix the transcript, then plan.\n',
+    "references/chroma-ae-workflow.md": '# Doing it with the chroma-ae MCP tools\n\nTool names are exact. Read each tool\'s own description for its full input shape; this page\nsays when to use which.\n\n| Tool | Does |\n|---|---|\n| `ae_transcribe` | ElevenLabs Scribe word-level transcript of a comp\'s audio (rendered in the background) or an audio/video file. Uploads client audio to a third-party US service: ask first, then `confirm_upload: true`. Returns `transcript_path` and `offset` for the planner |\n| `ae_captions_plan` | chunks, breaks and times words against a standard; returns the plan, the `changes` and the `violations`. Writes nothing |\n| `ae_detect_cuts` | finds shot changes; `mode: "list"` returns the cut times for `cut_times` |\n| `ae_captions` | writes captions to the comp (guarded, one undo step) |\n| `ae_captions_read` | reads existing captions back: text, timing, extents against the safe area |\n| `ae_captions_qa` | lints an SRT/VTT file, a plan or the caption layers against a standard |\n| `ae_captions_export` | writes an SRT, VTT or TTML sidecar, by default next to the project |\n| `ae_export_mogrt` | exports a template comp (from `ae_captions` `make_template`) as a .mogrt for Premiere |\n\n## ae_captions_plan options (ae_captions takes the same)\n\n| Option | Values and use |\n|---|---|\n| `standard` | `netflix_adult`, `netflix_kids`, `bbc`, `dcmp`, `social_9x16`: sets the limits and turns on fixing |\n| `fix` | default true with a standard: extend, then merge, then split; `false` only reports |\n| `min_gap_frames`, `close_gaps_under` | gap rules (default 2 frames; gaps under 0.5 s close to 2 frames) |\n| `cut_times` | shot changes from `ae_detect_cuts` (comp seconds); in/out times respect them |\n| `cleanup` | `drop_after_s`, `drop_music_tokens`, `min_word_s`, `remove_fillers`, `remove_stutters`, `glossary`, `case`, `strip_punctuation` |\n| `max_words` | cap on words per caption (phrase chunks) |\n| `single_word` | one word at a time (hooks only); short words merge, names and numbers stay whole |\n| `highlight_lead_frames` | how many frames early a word highlight starts (default 1) |\n| `speaker_style` | `color` (BBC order), `hyphen` (two speakers, one caption), `label` (`NAME: `); `speaker_names`, `speaker_colors` |\n| `accessibility` | never colour alone: adds a label at each speaker change when `speaker_style` is `color` |\n| `sdh` | `sound_events` (default on: `[laughter]` captions from ElevenLabs audio events), `lyric_ranges` (italic, music notes) |\n| `transcript.offset` | the `offset` that `ae_transcribe` returns |\n\n## ae_captions modes\n\n| `mode` | Result | Use for |\n|---|---|---|\n| `layers` | one text layer per caption | most work; easy to edit and animate per caption |\n| `single` | one text layer whose text changes over time | clean timeline, simple styles |\n| `words` | one layer per word, laid out as the caption; words build on as spoken | per-word animation |\n| `template` | one instance per caption of an Essential Graphics template comp, its fields (e.g. "Line 1", "Line 2") filled | brand-styled designs |\n\nOther options: `platform` (`reels_9_16` = safe on all three apps, the 9:16 default; `tiktok_9_16`,\n`instagram_reels_9_16`, `youtube_shorts_9_16`), `parent_to_null` (one null moves the whole set),\n`precompose`, `match: "time"` (update existing captions by time instead of by name), `highlight`\n(the current word), `look` (`pop`, `pill_slide`, `fill_sweep`, with `look_options`), `box` (the\nbacking box; 60% opacity or more), and `make_template` (a styled caption comp with Essential\nGraphics controllers, then `ae_save` and `ae_export_mogrt` for Premiere).\n\n## Recommended workflow\n\n1. `ae_transcribe` (after asking) or take the client\'s SRT.\n2. Read the transcript; fix the problems in `asr.md`.\n3. `ae_detect_cuts` with `mode: list` to get `cut_times`.\n4. `ae_captions_plan` with a standard, `cut_times`, `cleanup`, and the chunking options.\n5. Read the changes and the violations. Decide the rewordings a human has to make.\n6. `ae_captions` to write (layers, single, words or template), with the platform zone and box.\n7. `ae_captions_read` to confirm what is in the comp, then `ae_captions_qa` against the standard.\n8. `ae_captions_export` for the SRT or VTT sidecar.\n9. Look at frames: `ae_contact_sheet` or `ae_snapshot_frame` at the first caption, the busiest,\n   a cut, and the last. Check at phone width.\n\n## Other tools\n\n- Remotion: `@remotion/captions` defines a `Caption` type and parsers; `createTikTokStyleCaptions`\n  groups words into pages that switch on a time window (a combine-tokens-within-milliseconds\n  setting controls chunk size). See the [Remotion captions docs](https://www.remotion.dev/docs/captions)\n  and the `remotion-captions` skill. It does not enforce a broadcast standard; run the numbers\n  from this skill over its output.\n- HyperFrames ([heygen-com/hyperframes](https://github.com/heygen-com/hyperframes), Apache-2.0)\n  has a `transcribe` command that writes word timings (and `--to srt` or `--to vtt` sidecars) and a\n  caption-style registry. Its default model translates non-English speech to English; pass the\n  model and language explicitly (`asr.md`).\n',
+    "references/formats.md": "# File formats\n\nAlways ship a plain sidecar next to a burned-in version. It can be fixed, translated, searched\nand read by assistive tech. The burned-in file cannot.\n\n| Format | Use | Gotchas |\n|---|---|---|\n| SRT | the universal sidecar | see below |\n| WebVTT (.vtt) | web video, HTML5 `<track>` | see below |\n| TTML / IMSC | broadcast and streaming delivery | see below |\n| SCC (CEA-608) | US broadcast and legacy | see below |\n\n## SRT\n\n- Numbered cues, a timecode line, text, a blank line.\n- Timecode `00:00:01,000 --> 00:00:03,500`: a comma before the milliseconds.\n- UTF-8 (no byte-order mark if the player is picky).\n- No styling standard. `<i>` works in many players but is not part of the format; test the\n  target. Colours and positions do not travel.\n- Cue numbers must run in order, times must not go backwards.\n\n## WebVTT\n\n- First line `WEBVTT`, then a blank line.\n- Timecode with a period: `00:00:01.000 --> 00:00:03.500`; hours may be dropped.\n- Cue settings after the times: `line`, `position`, `align`, `size`.\n- `<v Name>` voice spans identify speakers; `<i>`, `<b>`, `<c.class>` allowed.\n- Style with `::cue` CSS. Support differs by player.\n- `NOTE` blocks are comments.\n\n## TTML and IMSC\n\n- XML. Regions use `tts:origin` and `tts:extent` in percent, so they scale with the frame.\n- `ttp:timeBase` (media, smpte); `ttp:frameRate` for frame timing; check the profile\n  (IMSC1 text or image) the receiver needs.\n- Styles are explicit in the file; BBC's guide gives the EBU-TT-D details for online delivery.\n- A schema-valid file can still be rejected by a platform's own checker.\n\n## SCC (CEA-608)\n\n- Frame-based timecode, usually 29.97 drop-frame (semicolon before frames).\n- 32 columns by 15 rows on screen; for pop-on captions, 2-4 lines are usable in practice.\n- Heavy character restrictions; no full Unicode. Treat it as a delivery conversion, not an\n  authoring format.\n\n## After Effects\n\nAfter Effects has no native SRT or VTT import. The chroma-ae MCP parses transcripts in Node\n(`ae_captions` takes cues; `ae_captions_read` gives them back) and builds text layers. A caption\nset in After Effects can be exported again as SRT, VTT or TTML with `ae_captions_export`. For\nPremiere, `ae_export_mogrt` makes a caption template; Premiere's own caption track takes\nSRT or VTT.\n",
+    "references/sdh-and-speakers.md": "# SDH, speakers and contrast\n\nSDH (subtitles for the deaf and hard of hearing) adds what the ear gets and the eye does not.\nPlain captions carry dialogue only. State which you are making.\n\n## Sound events\n\n- In square brackets, lower case: [door slams], [phone buzzing], [applause].\n- Only sounds that matter to the story or the mood. Not every footstep.\n- Put it on its own caption or its own line, timed to the sound.\n- Off-screen speech: the speaker's name in brackets before it, or a colour, plus position if\n  the format allows. Narrator: [Narrator] or the narrator colour.\n- Tone only where the words do not carry it: [sarcastically], [whispering].\n- Do not describe the picture.\n\n## Music\n\n- Song lyrics: italic, with a music note (a note symbol) at the start of each caption and at the\n  end of the last line of the lyric.\n- Instrumental that matters: [tense music] or [upbeat music playing].\n- Silence that matters: [silence]. Rare.\n\n## Speakers\n\n- Two people in one caption: a hyphen at the start of each line, one speaker per line.\n- A new speaker starts a new caption where it can, so the colour or label change is clear.\n- Name labels (\"MARCUS:\") on first appearance when the speaker is off-screen or unclear.\n\n### Speaker colours\n\nBBC's order for identifying speakers is white first, then yellow, cyan, green:\n\n| Order | Colour | Hex |\n|---|---|---|\n| 1 | white | #FFFFFF |\n| 2 | yellow | #FFFF00 |\n| 3 | cyan | #00FFFF |\n| 4 | green | #00FF00 |\n\nBy BBC convention a narrator takes yellow. Reuse a colour for the same person through the whole\npiece.\n\nColour must never be the only cue. About 1 man in 12 has a colour-vision deficiency, and many\nplayers and monochrome displays drop colour. Pair every colour with a label, a hyphen, or a\nposition. Chroma's `speaker_style` option in `ae_captions_plan` takes a colour, label or dash\nstyle; for accessibility work use a combination.\n\n## Contrast\n\nText against its background: 4.5:1 or better (WCAG 1.4.3; large text 3:1). Over moving footage,\nput a box behind the text rather than hoping the picture behaves.\n\nWhite text over a black box, WCAG contrast ratio by box opacity. Computed with the WCAG\nluminance formula for a pure white backdrop behind the box, which is the worst case (a bright\nsky or a white wall):\n\n| Box opacity | Contrast | Verdict |\n|---|---|---|\n| 50% | about 4.0:1 | fails 4.5:1 |\n| 60% | about 5.7:1 | passes |\n| 75% | about 10.4:1 | passes with margin |\n\nOver a mid-tone image (a mid-grey around sRGB 128), the same boxes score higher: 50% gives\nabout 10.4:1, so the table is a conservative guide. In practice, the box is not the only\nvariable: the picture changes under it. Use 60% as the floor and 75% for busy or bright\nfootage. A box also makes captions readable for viewers with low vision. Outline plus drop\nshadow with no box usually fails over bright areas.\n\nThe box covers the text block plus padding. Do not stretch it to full width: it hides picture.\n",
+    "references/social-and-platforms.md": "# Social and 9:16\n\nSocial captions are read on a phone, in a hurry, often with the sound off. They keep the\ntiming and break rules, with shorter lines and bigger text.\n\n## Defaults for 9:16\n\n- Phrase chunks of 2-4 words. Single words only for a short hook.\n- A portrait line holds about 25 characters at BBC's guide (37 in a 75% 16:9 frame is about 25 in\n  a 90% portrait frame). Do not use 42.\n- Large type: 60-80 px on a 1080 x 1920 frame at minimum; check at 360 px wide.\n- Two lines at most; one usually.\n- Put a box or heavy outline behind the text (contrast rules in `sdh-and-speakers.md`).\n- Highlight the current word with colour or scale of at most about 10%; start it a frame or two\n  early. Avoid bounce on every word: it tires the eye and fights the speaker's face.\n- Keep it off the speaker's mouth and eyes, and away from important graphics.\n\n## Platform UI zones (1080 x 1920), approximate\n\nThese are the areas the apps cover with their own buttons and text. They come from ad specs\nand third-party templates, not from the platforms' documentation; apps change their UI, so\nre-check once a year.\n\n| Platform | Top | Bottom | Left | Right |\n|---|---|---|---|---|\n| YouTube Shorts | 288 | 672 | 48 | 192 |\n| Instagram Reels | 269 | 672 | 65 | 65 |\n| TikTok | 240 | 660 | 120 | 120, widening to about 300 below y 840 |\n\nSafe on all three: x 120-888, y 288-1248. Place captions inside it, in the lower part (around\ny 900-1200) so they are clear of the face and the platform's description text.\n\n`ae_captions` has `platform` safe zones for these three and a `safe` option for the combined box.\n\n## Burned-in versus sidecar\n\n- Open (burned-in) captions are the only kind that survive every platform and download; use them\n  for social.\n- Upload a sidecar too (SRT or VTT) wherever the platform accepts one: it makes the post\n  searchable, translatable and correctable, and screen readers can use it.\n- Keep the clean, caption-free master. A burned-in file can never be corrected.\n\n## Speed\n\nSocial viewers read fast, but not that fast: stay near 17-20 cps for dialogue. For hook text,\nshorter is better than faster. Do not shorten a caption's time to make a beat; extend the\nspeech or cut words.\n",
+    "references/standards.md": "# Standards\n\nPick one standard per deliverable and say which. Numbers below are from the guides linked in the\nlast column; check the live page before a contractual delivery, as platforms revise them.\n\n| Standard | Reading speed | Line length | Lines | Duration | Gap | Source |\n|---|---|---|---|---|---|---|\n| Netflix English, adult | 20 cps | 42 characters | 2 | min 5/6 s (20 frames at 24 fps), max 7 s | 2 frames minimum | [style guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977-English-USA-Timed-Text-Style-Guide) |\n| Netflix English, children's | 17 cps | 42 | 2 | same | same | same |\n| BBC | 160-180 wpm, about 0.33 s a word | 37 broadcast (Teletext-derived); online 68% of a 16:9 frame | 2 | not fixed | if left, 1 s minimum, 1.5 s better | [BBC guidelines](https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/) |\n| DCMP Captioning Key | 130-160 wpm by level | 32 | 2 | min 40 frames, max 6 s | not fixed | [DCMP text](https://dcmp.org/learn/597-captioning-key---text), [rate](https://dcmp.org/learn/601-captioning-key---presentation-rate) |\n| Ofcom (UK broadcast) | no per-cue limits | - | - | sets access-service quotas and quality expectations | - | [Ofcom](https://www.ofcom.org.uk/tv-radio-and-on-demand/information-for-industry/guidance/tv-access-services) |\n| WCAG 2.2 | no numbers | - | - | - | - | [1.2.2](https://www.w3.org/WAI/WCAG22/Understanding/captions-prerecorded.html), [1.2.4](https://www.w3.org/WAI/WCAG22/Understanding/captions-live.html), [1.4.3](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) |\n\nNotes:\n- BBC's 160-180 wpm is for live subtitles (raised from 130-150) and is the recommended speed for\n  prerecorded work too; the per-word time (0.33-0.375 s) and the 1 s gap are guidance. Report\n  them as warnings, not failures. The 37-character figure is the broadcast limit, reduced when\n  coloured text is used. Check the current page before quoting a limit to a client.\n- Netflix's timing guide also closes small gaps: where two captions are 3 to 11 frames apart at\n  24 fps, close the gap to 2 frames. Shot-change rules are in `timing-and-breaks.md`.\n- Characters per second (cps) counts every character in the caption, spaces included, divided by\n  the time on screen. Words per minute (wpm) counts words. 20 cps is roughly 200 wpm at 6 letters a\n  word, which is why Netflix is looser than the BBC.\n- DCMP's three levels (lower, middle, upper) set 130, 140 and 160 wpm.\n\n## WCAG in one paragraph\n\n1.2.2 Captions (Prerecorded), level A: synchronised captions for the audio in prerecorded video,\nexcept where the video is a clearly labelled media alternative for text. 1.2.4 Captions (Live),\nlevel AA: captions for live audio. 1.4.3 Contrast (Minimum), level AA: text at least 4.5:1 against\nits background (3:1 for large text); this applies to captions you style yourself. WCAG sets no\nreading speed. Use a broadcast or streaming standard for that.\n\n## Audio and caption sync\n\nITU-R BT.1359-1 gives the tolerances for audio against picture (as recalled from the\nRecommendation; confirm the figures before quoting them): detectable at about +45 ms when audio\nleads and -125 ms when audio lags, acceptable up to about +90 ms and -185 ms. Captions are\njudged against the speaker's lips by the same eyes, so a start within about 2 frames of speech\nonset is safe, and the 50-100 ms drift in word timestamps (`asr.md`) sits at the edge of\ndetectable. A caption that is early reads better than one that is late.\n",
+    "references/timing-and-breaks.md": '# Timing, breaks and shot changes\n\n## Order of operations\n\n1. Chunk the words into captions (by sentence, pause or word cap).\n2. Break each caption into lines.\n3. Set in and out times from the words, then apply the limits (cps, minimum, maximum).\n4. Fix gaps and shot changes last, since they move times by frames.\n\n## Chunking\n\n- Break at a sentence end, at a pause of 150 ms or more, or at the word cap, whichever comes first.\n- Subtitle-style: fill to the line limits (42 characters, 2 lines on Netflix). Phrase chunks: 2-4\n  words, set with `max_words`. Single word: only for a short hook.\n- Merge any word shorter than 8 frames into its neighbour so it does not flash.\n- Keep numbers with units, names together, and a title with its name ("Dr Patel").\n- Never time two words as one entry; per-word highlights need one entry per word.\n- Highlight a frame or two early (`highlight_lead_frames`): a highlight that lands on the word\n  looks late.\n\n## Timing\n\n- In: the speech onset, or up to 2 frames before. Never later than the first word.\n- Out: the end of speech plus a linger of about 0.5 s where space allows, but never over the\n  next caption\'s in-time minus the gap, and never past the speaker leaving the shot.\n- BBC: do not anticipate speech by more than 1.5 s or hang on for more than 1.5 s after it.\n- Minimum duration: 20 frames at 24 fps (Netflix), 40 frames (DCMP). A one-word caption still\n  gets the minimum.\n- Maximum: 7 s (Netflix), 6 s (DCMP). Split a long one at a clause boundary.\n- Reading speed: if a caption is over the limit, extend its out-time into the gap or linger\n  first, then pull its in-time earlier (by no more than about 0.5 s), then split or trim wording\n  last. Retime before rewording.\n- Frame maths at 24 fps: 1 frame = 41.7 ms, 2 frames = 83 ms, 12 frames = 0.5 s.\n\n## Gaps\n\n- Minimum gap between two captions: 2 frames (Netflix).\n- Gaps of 3-11 frames at 24 fps: close them to 2 frames, so the caption does not blink.\n- Gaps of 12 frames or more (0.5 s) are real pauses. BBC says if you leave a pause gap it should\n  be 1 s at least, better 1.5 s, since shorter gaps look jerky.\n- Never overlap two captions in time unless they carry different speakers and the format allows\n  simultaneous cues.\n\n## Shot changes\n\nCut times come from `ae_detect_cuts` (or the editor\'s edit list).\n\n| Case | Rule (Netflix) |\n|---|---|\n| In-time near a cut | on the cut frame, or at least 12 frames (0.5 s) away from it |\n| Out-time near a cut | 2 frames before the cut, or at least 0.5 s after it |\n| Caption spanning a cut | acceptable when the speech spans it; otherwise snap the out-time to 2 frames before |\n\nA caption that starts 3 frames after a cut, or ends 2 frames after one, flickers against the new\nshot. Snap to the cut or move well clear of it.\n\n## Line breaks\n\n- One line if it fits. Two lines only when needed or when the speaker switches.\n- Bottom-heavy: when both lines are used, make the lower line longer, so the top one does not\n  cover the picture more than needed. Pyramids are fine; inverted ones are not.\n- Break at the highest grammatical boundary available, in this order: after a sentence end or\n  strong punctuation; before a conjunction or relative pronoun; before a preposition phrase; between\n  subject and verb phrase only if nothing better.\n- Never end a line on: an article (a, an, the), a preposition (of, to, in, on, with), a\n  conjunction (and, but, or), an auxiliary (is, was, have, will), or a subject pronoun that\n  comes before its verb (I, he, she, we, they, you).\n- Never split a first name from its surname, a number from its unit, a phrasal verb ("give up")\n  or a hyphenated compound.\n- Do not break the caption in the middle of a quoted title or a name of a thing.\n- The planner scores candidate breaks with `breakPenalty` / `isWeakEnd`; a violation of the\n  weak-ending rule is reported, not hidden.\n- If a break cannot be made well within the character limit, re-chunk (shorter caption) before\n  breaking badly.\n'
+  },
+  "motion-director": {
+    "NOTICE.md": '# Sources and licences\n\nThis skill is Chroma\'s own synthesis, written in its own words. It adapts ideas and numbers from\nthe sources below; where they disagreed, the choice made is noted in the text (mostly by the\n"register" table in SKILL.md). No source text was copied verbatim. Researched 2026-11-05.\n\n| Source | Licence | Used for |\n|---|---|---|\n| [lottiefiles/motion-design-skill](https://github.com/lottiefiles/motion-design-skill) | MIT, (c) 2025 LottieFiles | duration and easing tables, archetypes, springs, Disney principles with numbers, stagger budgets, the 1/3 rules, ambient loops, severity tiers, symptom fixes |\n| [charlie947/motion-graphics-skills](https://github.com/charlie947/motion-graphics-skills) | MIT, (c) Charlie Hills | brand-first workflow, facts discipline, the 8 s move/hold/return loop, effect techniques, safe zones and hero sizes, banned defaults, one-change revisions, delivery specs |\n| [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes): hyperframes-animation, hyperframes-core, general-video, motion-graphics, and the later `skills/hyperframes/references` | Apache-2.0, (c) HeyGen | ease by role, motion budget, transitions as handoffs, velocity matching and recipes, beat grid, reading time, type floors, captions, audio levels, beat shares, pacing and staleness, review loop (measure then look, contact sheets, P0-P2 notes), the "looks generated" list |\n| [Sunwood-ai-labs/hyperframes-motion-reel-skill](https://github.com/Sunwood-ai-labs/hyperframes-motion-reel-skill) | MIT, (c) 2026 Sunwood AI Labs | beat-grid-first timing, contrast of pace, text as image, motion-blur limits, state as a function of time |\n| [geekjourneyx/hyperframes-motion-director](https://github.com/geekjourneyx/hyperframes-motion-director) | AGPL-3.0 | **ideas only, paraphrased, nothing copied**: brief then confirm, stills before motion, layout as rectangles, vertical title tiers, hook timing gates, primitives chosen by meaning, inspectable transition midpoints, rendered-frame evidence, learning rules from defects |\n\nCaption note: an earlier draft of `references/sound-and-captions.md` followed the HyperFrames\ncaptions references too closely. That section is now rewritten in Chroma\'s own words and kept to\nmotion points; the caption rules moved to the separate `captions` skill, whose `NOTICE.md`\ncredits the HyperFrames caption ideas (Apache-2.0, (c) HeyGen: Whisper failure modes, word\ngrouping by energy, clean-up of words over silence) along with the other sources.\n\nChanges from the sources: rewritten for any toolchain with After Effects as the main target\n(frame conversions, bezier to AE influence and speed, chroma-ae MCP tool mapping); conflicting\nadvice reconciled by register; web-, HTML- and GSAP-specific material removed.\n',
+    "SKILL.md": "---\nname: chroma-motion-director\ndescription: \"Direct and build motion pieces end to end: brief, numeric spec, still frames, choreography, sound, review and delivery, with measured timing, easing, stagger, transition, type, caption and audio rules. Use for any motion graphics, launch or promo film, social reel, explainer, title sequence, logo sting, lower third, stat or chart animation, kinetic type, or motion review, whether it is built in After Effects (through the chroma-ae MCP), Remotion, HyperFrames, Lottie or code. Also use to critique motion (\\\"it feels robotic / cheap / like slides / too fast\\\") and to turn adjectives into numbers. Trigger phrases: 'motion', 'animate', 'animation', 'promo', 'launch video', 'reel', 'sting', 'lower third', 'kinetic type', 'title sequence', 'explainer', 'easing', 'stagger', 'transition', 'make it feel premium', 'review this animation'.\"\nmetadata:\n  version: \"1.0.0\"\n  sources: see NOTICE.md\n---\n\n# Chroma motion director\n\nOne skill for directing motion, from a one-line brief to a delivered file. It merges eight\npublic skills (see `NOTICE.md`) and resolves where they disagree. The numbers are the point:\nevery rule below is meant to be measured, not admired.\n\n**Load only what the task needs:**\n\n| Task | Read |\n|---|---|\n| Any new piece | this file, then `references/spec.md` |\n| Timing, easing, springs, ms to frames, AE ease values | `references/timing-and-easing.md` |\n| Groups, stagger, cameras, transitions between scenes | `references/choreography.md` |\n| Text sizes, reading time, safe zones, layout, colour | `references/type-and-layout.md` |\n| Structure, beat shares, pacing, scene recipes | `references/story-and-pacing.md` |\n| Music, voice, sound effects, levels, captions | `references/sound-and-captions.md` |\n| Checking a piece, writing notes, the \"looks generated\" list | `references/review.md` |\n\nFor anything made for Chroma, `chroma-brand-guidelines` sets the look (palette, type, voice);\nthis skill sets the motion. In After Effects, drive the work through the `chroma-ae` MCP tools\n(`ae_motion_review`, `ae_contact_sheet`, `ae_check_legibility`, `ae_set_keyframe_ease`,\n`ae_stagger`, `ae_loudness_check` and so on) rather than raw JSX.\n\n## The process\n\nSix gates. Do not skip one because the brief is short; shrink it instead.\n\n1. **Brief, then stop.** One sentence of intent (what the viewer should feel or know at the\n   end), the audience, the format (size, fps, length, platform), the single message, the arc,\n   and what must not happen. Ask at most one clarifying question; where something is unknown,\n   write `ASK ME` rather than guess (never guess a hex colour or a fact). Show the beat sheet and\n   wait for a yes before building.\n2. **Spec: adjectives into numbers.** Write the piece's `MOTION.md` from\n   `references/spec.md`: register, signature ease, a three-tier duration palette, stagger,\n   overshoot budget, colour roles, type sizes, safe zones, the banned list, and the beat table.\n   \"Premium\" means 350-600 ms, ease (0.4, 0, 0.2, 1), no overshoot; it does not mean \"nice\".\n   A project that already has a `MOTION.md` or brand file: read it first and follow it.\n3. **Stills before motion.** Build the end state of every beat as a still and check it: one\n   hero, readable at phone size, inside the safe zones, nothing touching an edge it shouldn't.\n   Animate *from and to* those stills. A frame that fails as a still will not be saved by motion.\n4. **Choreograph.** One primary motion idea per scene, at most one supporting motion, one\n   signature moment per film. Ease by role, stagger by importance, overlap the next element when\n   the last is 30-50 % done, hand scenes off without fading out. Drive cuts and hits from one\n   beat grid when there is music.\n5. **Review: measure, then look.** Run the measured checks first (`references/review.md`), then\n   contact sheets: each beat's start and middle, a strip across every cut (\u22120.2 s to +0.2 s), and\n   the beat frames at phone width (360 px). Notes are `t=4.2s \xB7 where \xB7 problem \u2192 exact change \xB7\n   what stays`, ranked P0/P1/P2. Report only what you actually saw; say so when there is nothing.\n6. **Deliver and verify the file.** Check the rendered file, not the preview: duration, fps,\n   size, codec, colour range, loudness, frame 0 (it is the thumbnail: never black, never a lone\n   logo). State what was measured and what was only looked at.\n\n**Revisions:** one change per note. Keep the motion, timing and approved parts exactly as they\nare, and say what changed. Build exactly what was asked; offer extras instead of adding them.\n\n## Pick a register first\n\nMost conflicts between the sources disappear once the register is fixed. Pick one per piece\n(a 90/10 mix at most) and write it in the spec.\n\n| Register | Use for | Durations | Overshoot | Stagger, total | Character |\n|---|---|---|---|---|---|\n| **UI micro** | product UI in a demo, buttons, toggles, cards | 80-450 ms | 0-5 % | 20-60 ms, under 400 ms | quick, functional, no bounce on UI |\n| **Brand film** (default) | launches, promos, reels, titles, stings | moves 300-800 ms, reveals 0.8-1.6 s | 0 % premium, 3-10 % energetic | 40-120 ms, about 500 ms | arrive slow, leave clean, still when landed |\n| **Energetic** | social hooks, sport, music-led cuts | 150-400 ms | 10-25 % on position or scale only | 30-60 ms | beat-driven, hard accents, contrast of pace |\n| **Handmade** | editorial, explainer, collage, Vox-like | on twos (hold each pose 2 frames at 24 fps) | none | per element, loose | stepped, tactile, never smooth corporate easing |\n\nChroma's own work defaults to **brand film, premium**: no overshoot, no glow, no bounce,\nlanded type dead still.\n\n## Core rules (the short version)\n\n**Easing**\n- Out for arrivals, in for exits, in-out for moves between positions and for camera. Linear only\n  for rotation, progress, timers and genuinely mechanical motion.\n- Use at least three different eases in a piece; no more than two tweens with the same ease and\n  duration in a scene. Everything on one ease at 0.5 s is the clearest sign of generated motion.\n- Arrivals take long-tailed ease-outs (expo or quart out). Exits are 40-50 % shorter than\n  entrances and ease in.\n- Springs: damping ratio 0.7-0.85 reads premium, 0.4-0.6 playful, under 0.3 cartoon. Position\n  and scale may overshoot; opacity, colour and numbers never do.\n\n**Choreography**\n- One hero per moment; at most a third of a group moves at once. Dim the others to 40-60 %.\n- Stagger by importance, not by layer order: letters 1 frame apart, words 60-120 ms, list items\n  40-80 ms, and keep a group's total stagger near 500 ms so it reads as one beat.\n- Nothing travels more than a third of the frame without an intermediate key or an arc.\n- After a group resolves, leave 100-200 ms of stillness; a landed title stays dead still.\n- First move 0.1-0.3 s in, never at frame 0 of a scene unless it is a cut-in.\n\n**Transitions**\n- Hand off, don't fade out then in: the outgoing and incoming motion happen together, with the\n  ease mirrored across the seam (in on the way out, out on the way in) and the fastest frames at\n  the cut. Match direction, axis and the sign of any scale change across the cut.\n- Three to five kinds of transition per film, each with a cause on screen. One primary for\n  60-70 % of seams. At most a third are hard cuts. Never crossfade between two different worlds.\n- Every transition has a midpoint frame worth looking at. A blank midpoint is a failure.\n\n**Type**\n- Readable text is at least 2.6 % of the frame's short side (28 px at 1080). Titles 4-9 % of\n  frame height; hero words can fill 60-90 % of the width.\n- Hold a line 0.5 s + 0.3 s per word; the last line at least 2 s; at most 6 words a line.\n- Text is still before it has to be read. Animate text with a device (mask, split, scan,\n  compress, assemble, path handoff), not opacity plus a 20 px slide on everything.\n\n**Pace**\n- The hook is readable by 0.8-1.2 s; frame 0 is never empty. Something new every 2-4 s.\n  Alternate dense and still beats; the slowest scene is about three times the fastest.\n- Over 3 s with nothing changing is a dead stretch. Any single treatment goes stale after about\n  6 s.\n\n**Sound**\n- Voice leads; music sits about 14 % under it and is carved around it, not just ducked. Social\n  mixes at \u221216 to \u221214 LUFS, peaks at \u22121 dBTP or lower. A hit's peak lands one frame after its\n  picture. Effects only for real on-screen causes.\n\n**Content**\n- Every name, date and number on screen comes from an approved list. Sample data carries a\n  visible \"illustrative data\" label.\n- Deletion test for every element: if removing it changes nothing, remove it.\n\n## Working in After Effects\n\n- Convert ms to frames at the comp's frame rate before keying (200 ms is 6 f at 30 fps, 4.8 f\n  at 24, so round to 5 and say so). Beat frames come from the beat index, never accumulated.\n- Cubic-bezier eases become AE keyframe influence and speed: the table is in\n  `references/timing-and-easing.md`. Apply them with `ae_set_keyframe_ease`; check them with\n  `ae_motion_review` (linear keys, abrupt starts and stops, overshoot, speed jumps).\n- Seed every random (`seedRandom(n, true)` in expressions) so any frame renders the same.\n- Use `ae_contact_sheet` for the sheets in step 5, `ae_check_legibility` and `ae_measure_text`\n  for type, `ae_loudness_check` for levels, `ae_check_delivery_file` on the render.\n",
+    "references/choreography.md": `# Choreography, cameras and transitions
 
 ## Groups
 
@@ -74292,24 +74471,74 @@ Choose the device by what the moment means, not from a menu of effects:
 Lines and connectors are anchored at both ends to something with a job, or replaced by a signal
 on the component itself (a dot, an edge highlight, a progress strip).
 `,
-  "references/review.md": "# Review: measure, then look\n\nTrust the numbers over your eye, then use your eye for what numbers can't see.\n\n## 1. Measure\n\nRun these before anyone watches it. Each has a fix.\n\n| Check | Fails when | In AE (chroma-ae) |\n|---|---|---|\n| Linear spatial keys | position, scale or rotation of a non-mechanical element moves at constant speed | `ae_motion_review` |\n| Abrupt start or stop | speed jumps from or to zero without an ease | `ae_motion_review` |\n| One ease everywhere | more than two tweens in a scene share the same ease and duration | `ae_get_keyframes` across layers |\n| Wrong direction | an entrance eases in, or an exit eases out | `ae_get_keyframes` |\n| Overshoot where it shouldn't | opacity, colour or a counting number overshoots | `ae_motion_review` |\n| Exit too long | an exit is not 40-50 % shorter than its entrance | keyframe spans |\n| Stagger | sibling start offsets outside the table, or the group spread far over 500 ms | `ae_stagger` plan / keyframe starts |\n| Density | more than a third of a group moving at once | keyframe overlap |\n| First move at 0 | a scene's first move starts on its first frame | keyframe starts |\n| Unread line | a text layer is on screen for less than 0.5 s + 0.3 s per word | text layer in/out and word count |\n| Text below the floor | text under 2.6 % of the short side at its smallest on-screen scale | `ae_check_legibility`, `ae_measure_text` |\n| Outside safe zones | text or logo outside title-safe or the platform's bands | `ae_check_legibility`, `ae_house_style_check` |\n| Overlap | text overlapping text or the subject | `ae_check_text_overlap` |\n| Dead stretch | over 3 s with nothing changing | per-frame change across the timeline |\n| First frame empty | frame 0 is black, empty or a lone logo | `ae_snapshot_frame` at 0 |\n| Silent film | over 15 s with no sound | `ae_audio_analyze` |\n| Loudness | outside \u221216 to \u221214 LUFS or peaks over \u22121 dBTP | `ae_loudness_check` |\n| Loop seam | the last frame of a loop differs from frame 0 | `ae_compare_frames` |\n| Nothing moves | the biggest change against frame 0 is near zero in a \"motion\" piece | `ae_compare_frames` |\n| Late or out of order | an element appears after its intended time, or before one it should follow | markers against layer in-points |\n| Facts | a name or number on screen isn't on the approved list | text layers against the list |\n| Delivery | duration, fps, size, codec, colour range or audio streams differ from the spec | `ae_check_delivery_file`, `ae_verify_render` |\n\n## 2. Look\n\nThree contact sheets:\n\n1. **Beats:** each scene just after it starts, at its middle, and at every beat or hit.\n2. **Seams:** a strip across every cut, from \u22120.2 s to +0.2 s. Look for a jump in position,\n   scale or colour at the seam, a speed mismatch, and a blank midpoint.\n3. **Phone:** the beat frames at 360 px wide, with the sound off.\n\nDescribe each beat frame as a stranger would, in one sentence. Ask: does it read as what it is?\nDoes the subject separate from the background? Is anything you'd have to explain? Would the\npictures alone tell the story? Then the screenshot test: a good motion piece loses meaning when\nreduced to stills; slides don't.\n\nUse the rendered file for this, not the preview: the two can differ. Pull the same frames from\nthe render and compare them.\n\n## 3. Write notes\n\nOne line each:\n\n```\nt=4.2s \xB7 headline \xB7 lands then keeps scaling \u2192 stop the scale key at 4.0s \xB7 keep the ease and timing\n```\n\nRank them **P0** (breaks the read), **P1** (weakens it), **P2** (polish). Don't score out of 10.\nReport only what you actually saw; if there is nothing, say so. If the film feels busy, remove a\nthird of the motion before adding anything.\n\nOptionally ask a fresh agent to critique from only the brief and the sheets, without seeing the\nbuild, then compare.\n\nEnd with a short delivery note: the calls made, what was measured and what was only looked at,\nthe weakest shot, and any warnings deliberately kept and why. Every \"pass\" names the frame and\ntime it was checked on.\n\n## 4. Learn\n\nEach defect found late gets a cause and a rule: add it to the project's `MOTION.md` banned list\nor to the checks above, so it is caught earlier next time. The AE MCP's `ae_learn_taste` and\n`ae_taste_rules` keep these per project.\n\n## Looks generated\n\nThe tells. Any of these in a piece needs a reason.\n\n- Everything fades and slides up; every scene enters the same way; the same ease at 0.5 s on\n  everything.\n- Titles that keep drifting, breathing or scaling after they land; floating or pulsing loops on\n  titles or UI as fake life.\n- Bounce on UI; click rings; typewriter headlines (typing belongs inside an input box); glow and\n  bloom as decoration; gradients on text.\n- A dark void with small centred things; purple-to-blue backgrounds; glass cards; three cards in a\n  row; grids of KPI tiles; HUD corners; a logo docked in a corner.\n- Grey placeholder bars, stock icons, emoji, clip art, rockets and sparkles.\n- A late, slow push-in after the frame has been read.\n- Crossfades between unrelated worlds; a fade out then a fade in at every cut.\n- A pie chart, a legend, gridlines.\n\n## Symptoms to fixes\n\n| It feels | Try |\n|---|---|\n| Robotic | ease every spatial key, add arcs, offset starts by 50-150 ms |\n| Cheap or flat | a secondary layer, follow-through, 3-10 % overshoot on position or scale (not in premium) |\n| Too slow | shorten holds before shortening moves; check the duration tier for the register |\n| Too fast | slow the zooms and pans to about 0.7x, leave the rest |\n| Like slides | enter each scene through an object already on screen; vary the entrances |\n| Busy or distracting | one hero per moment; remove a third of the motion |\n| No personality | pick a register and a signature ease and use it for 80 % of moves |\n| Inconsistent | one duration palette, one entrance pattern, the same ease family per group |\n",
-  "references/sound-and-captions.md": "# Sound and captions\n\n## Voice\n\n- Narration runs 2.2-2.5 words a second. A scene of about 9 s carries about 19 words, 26 at most.\n  A 30-90 s piece is about 155 words or fewer.\n- Script first, then real timings: the recorded (or synthesised) voice's word timestamps set the\n  scene boundaries, not the written estimate. If the voice runs longer than the picture, trim the\n  script; never stretch the motion to fill.\n- Write numbers as they are spoken.\n\n## Music and effects\n\n- Voice leads. Music under voice sits at about 14 % volume and is **carved** (an EQ dip where the\n  voice lives, around 1-4 kHz), not just ducked. Drop the score entirely while the voice must be\n  heard clearly.\n- Music enters on its strongest bar and ends on a bar line with a short fade. Looping beds: 0.4 s\n  fade in, 1.5 s fade out. Anything over 15 s that tells a story gets a bed plus effects.\n- Effects only for real causes on screen: a click, a whoosh on a cut, a key tick, a pop, one\n  riser into the payoff. Each hit sits 3-6 dB above the bed. Rotate two or three takes of a\n  repeated sound.\n- Timing: a sound's peak lands one frame after its picture. A move that lands on a hit starts\n  40-190 ms early; a reaction starts 0-45 ms after it.\n- A bed whose energy is mostly under 150 Hz disappears on phone speakers.\n- A generated score is possible in code (low bed, a hit per shot, a lift at the end): kick as a\n  falling sine, hats as filtered noise, an impact as sub plus noise with a short decay.\n- Audio-reactive motion stays micro: text and logos pulse at most 5 % in scale, backgrounds\n  10-30 %. No equaliser bars, no strobing.\n- Never claim a beat analysis that did not happen; a hand-made beat map is fine if it says so.\n\n## Levels\n\n| Target | Value |\n|---|---|\n| Social and web mix | \u221216 to \u221214 LUFS integrated |\n| True peak | \u22121 dBTP or lower |\n| Speech level in a clean recording | roughly \u221226 to \u221216 dB |\n| Broadcast | the platform's spec (EBU R128 \u221223 LUFS, ATSC A/85 \u221224 LKFS) |\n\nEQ starting points: high-pass at 80 Hz for rumble; reduce mud at 250 Hz, \u22123 dB, Q 1.2; reduce\nboxiness at 400 Hz, \u22123 dB; clarity at 3 kHz, +2.5 dB; soften harshness at 3.2 kHz, \u22123 dB.\nSubtract before adding; the limiter goes last.\n\n## Captions\n\nThe caption rules (standards, reading speed, line breaks, speakers, file formats, tools) live in\nthe `captions` skill. This section covers only how captions meet the motion.\n\n- Time a caption to the speech, then check it against the beat grid: a caption change that lands\n  within a few frames of a cut or a hit looks planned; one that lands just off it looks like a\n  mistake. Move the caption, not the cut.\n- Keep captions out of the action: not over the speaker's mouth or eyes, the hero, or the\n  platform UI. Give them one fixed home so the eye learns where to look.\n- Caption motion is quiet. A fade or a short rise of 100-150 ms is enough; save big moves for\n  the hero. A word highlight starts a frame or two early.\n- One caption style per film: same font, size, colour roles and box. Change it only with the\n  scene, and on purpose.\n- Over footage with a busy background, use a backing box (60% black or more) before reaching for\n  blend modes.\n- Check captions in the silent pass: the film should work with the sound off.\n\n## Review with and without sound\n\nThree passes: **silent** (can the story be followed with the sound off, at phone size?),\n**audio** (do the hits land on their causes?), **frame** (is each hit frame readable as a\nstill?). Say which of these were measured and which were only judged by eye or ear; a loudness\nreading is a measurement, \"the mix sounds fine\" is not.\n",
-  "references/spec.md": "# The spec: MOTION.md\n\nEvery piece gets a `MOTION.md` beside its project (in AE projects, next to the `.aep`). It turns\nthe brief's adjectives into numbers, and it is what the review checks against. Read an existing\none before touching the piece; if the brand has one, copy it in and only add the piece's beats.\n\nFill every field. Where the answer is unknown, write `ASK ME`; never invent a colour or a fact.\n\n```markdown\n# MOTION.md: <piece name>\n\n## Goal\nOne sentence: what the viewer feels or knows at the end.\nAudience: ...   Platform: ...   Sound: on / off by default\n\n## Format\nSize: 1920x1080 | 1080x1920 | 1080x1350 | 1080x1080     Fps: 24 | 25 | 30 | 60\nLength: ... s    Music: ... BPM (or none)    Safe zones: see type-and-layout.md for the format\n\n## Register\nbrand film / premium     (UI micro | brand film | energetic | handmade; at most a 90/10 mix)\n\n## Motion language\nSignature ease: (0.4, 0, 0.2, 1)  for about 80 % of moves\nArrival ease: expo out    Exit ease: cubic in, 40-50 % shorter than entrances\nCamera ease: sine in-out\nDurations: short 300 ms / medium 500 ms / long 800 ms   (in frames: ... / ... / ...)\nStagger: words 80 ms, items 60 ms, group total about 500 ms\nOvershoot: 0 % (position and scale only, never opacity, colour or numbers)\nEntrance pattern: mask reveal from below\nTransitions: primary = <kind> for most seams; accents = <kind>, <kind>; hard cuts at most 1/3\nMotion blur: fast moves only\n\n## Look\nColours (hex, with a role each): background ..., text ..., accent ..., data ...\nType: display <font> <weight>, body <font> <weight>; title ... px, body ... px, floor 2.6 % of short side\nTexture: grain / none     Background: never flat #000\n\n## Facts\nThe approved names, dates and numbers. Nothing else appears on screen.\nSample data: labelled \"illustrative data\" on every frame it appears.\n\n## Banned\nFive things this piece must never do (start from review.md \"Looks generated\").\n\n## Beats\n| # | Time (s or beats) | Role | On screen | Hero frame at | Enter / lock / exit / bridge | Sound |\n|---|---|---|---|---|---|---|\n| 1 | 0-1.2 | hook | ... | 0.8 | ... | hit at 0.8 |\n\n## Checks\nThe measured checks in review.md that apply, and any extra ones for this piece.\n```\n\n## Brand defaults\n\nFor Chroma's own pieces, the register is brand film, premium: signature ease (0.4, 0, 0.2, 1),\nno overshoot, no glow or bounce, type still once landed, colours and fonts from\n`chroma-brand-guidelines`, and the brand's spectrum used once per piece.\n",
-  "references/story-and-pacing.md": "# Story, structure and pacing\n\n## The brief\n\nBefore anything is built, the brief answers:\n\n- **Intent:** what the viewer feels or knows at the end, in one sentence.\n- **Essence:** the core point, the main tension, the emotional centre, the one word to amplify,\n  one visual metaphor.\n- **Format:** size, fps, length, platform, safe zones, sound on or off by default.\n- **Facts:** the approved list of names, dates and numbers that may appear.\n- **Arc** (below), **risks**, and **what must not happen**.\n\nThen a beat sheet: for each beat its time range, on-screen text, the hero-frame time (the frame\nthat has to work as a still), how text enters, locks, is emphasised, exits and bridges to the\nnext beat, and what would be lost if the motion were removed. Show it and wait for approval.\n\nTreat a short prompt as a seed: expand it into a world, a story, keywords, colour, type, shapes,\ncamera and sound, but anything the user specified wins. Don't settle on the safe option.\n\n## Arcs\n\n| Length | Arc |\n|---|---|\n| 10 s | hook, tension, reveal, CTA |\n| 15 s | hook, tension, reveal, proof, CTA |\n| 30 s | pattern interrupt, conflict, reveal, proof, outcome, CTA |\n| Launch, 20-45 s | hook 8 %, tension 12 %, reveal 8 % (placed 20-30 % in), proof 40 %, payoff 20 % (placed 60-80 % in), claim 8 %, end card 8 % (holds 2-3 s) |\n\nNarrative roles for scenes: hook, problem, product intro, key feature, benefits, social proof,\nCTA, brand outro. A product promo climbs a ladder: pain, mechanism, proof, confidence, CTA.\n\n**Reference durations:**\n- 15 s promo: hook 0-3 s, proof 3-11 s at about 2.5 s a point, end card 11-15 s.\n- 45 s launch: 0-4, 4-9, 9-17, 17-22, 22-32, 32-38, 38-45 s; the CTA holds at least 3 s.\n- Apple-style product film: 6-8 scenes of about 2.5 s.\n- Explainer: 8-14 shots, one sentence each; the question shown big and a first surprise within\n  5 s.\n\n## Pacing\n\n- **Hook:** the first readable thing by 0.8-1.2 s (about 0.5 s for an unnarrated sting). The\n  first 0-2 s name the first place the eye goes, the largest word or object, and a motion event\n  that stops the scroll. The first 2 s are the densest. Frame 0 is the thumbnail: never black,\n  never a lone logo.\n- **Rhythm:** shots average 1.8-3 s; montage cuts 0.13-0.8 s; a product demo holds one framing\n  7-10 s; vertical shots 1-2 s with a new beat every 2-4 s. Hold 0.3-0.75 s before a payoff.\n- **Contrast of pace:** fast, stop, explode; dense, release. Alternate high-motion and still\n  beats, and don't give every beat the same length. The slowest scene is about three times the\n  fastest.\n- **Staleness:** something new every 2-4 s. Over 3 s with nothing changing is a dead stretch. A\n  static card dies after about 8 s (stage a reveal inside anything over 15 s). Any single\n  treatment goes stale after about 6 s. Over a talking head, one card every 6-8 s (under a\n  minute), 8-12 s (up to 3 min), 12-20 s (up to 10 min).\n- **Pattern interrupt:** past about 2.5 s, change exactly one thing.\n- **Holds:** title 0.6-1.2 s after it lands \xB7 proof or stat 0.8-1.5 s \xB7 CTA at least 1 s and the\n  calmest hold in the film \xB7 after-state of a transformation at least 1.2 s.\n- **Music-led:** every cut, impact, title entrance and camera switch sits on a beat, half beat or\n  quarter beat. Write times in beats, not seconds.\n\n## Scene recipes\n\n- **Stat:** the count runs 1.2-1.6 s on a decelerating ease, then holds; a ring or bar finishes\n  with the count; the label appears after the number lands (value, then meaning). About 4-6 s in\n  all. No overshoot.\n- **Logo reveal:** 3-5 s. Vector logos draw on; raster logos reveal through a mask or a scale.\n  An underline or light sweep, then hold. Export with alpha for stings.\n- **Lower third:** 3-6 s. A bar wipes in from the left (scale X 0 to 100 %), the text slides up\n  behind it, hold, then slide out. Bottom 30 %, title-safe, alpha.\n- **Highlight a phrase:** the sentence slides up 52 px over 0.8 s (quart out), and after it has\n  settled a highlight band sweeps left to right over 0.5-1.5 s scaled to the phrase length. The\n  text is never zoomed to emphasise it.\n- **Title card (the breather):** one move, then a still hold of 3-5 s.\n- **Kinetic beat slam:** one beat list drives every entrance; each phrase gets its own entrance\n  (scale slam, side snap, rise and rotate), never the same punch-in reused; hits 0.35-0.6 s,\n  exits 0.25 s or less; end on a locked final frame.\n- **Press and success:** container scale 0.9 to 1.0 with 5-10 % overshoot over 200 ms, a tick\n  drawn over 150 ms starting 100 ms later, 400-500 ms in all.\n- **Loading or dashboard build:** skeleton at 0, hero at 100-250 ms, widgets from 200 ms at 60 ms\n  apart, chart at 350 ms, all landed by 500 ms, ambient from 650 ms.\n\n## Variants and references\n\n- Build the first 10 s in two or three styles and choose before building the rest.\n- Breaking down a reference in five lines: pace, what changes, type, colour and light, the one\n  idea. Take moves from a reference video and the look from a still; never copy a logo, copy or\n  palette. Note the exact source, at least three observed visual properties and what must not\n  drift from the story.\n",
-  "references/timing-and-easing.md": "# Timing and easing\n\n## Durations\n\n**By element (UI register):** tooltip 80-120 ms \xB7 button or toggle 120-180 ms \xB7 icon\n150-250 ms \xB7 card 200-350 ms \xB7 modal 300-400 ms \xB7 page 400-600 ms \xB7 dramatic reveal\n600-1200 ms \xB7 ambient loop 2-20 s. Hover under 100 ms, press under 150 ms, settle 200-300 ms,\nerror shake 300-400 ms with 2-3 swings of \xB110-15 px.\n\n**By speed tier (film register):** fast 0.15-0.3 s (energy) \xB7 medium 0.3-0.5 s \xB7 slow\n0.5-0.8 s (luxury) \xB7 very slow 0.8-2.0 s (cinematic). A fast move across the frame is\n0.3-0.6 s. A premium reveal is 0.8-1.6 s. A tween over 2.0 s is usually too slow unless it is a\ncamera drift or an ambient loop.\n\n**By distance:** scale the base duration by 0.8x at 50 px, 1.0x at 100 px, 1.3x at 200 px,\n1.6x at 400 px, 1.8-2.0x across the full frame.\n\n**By material:** rigid 1.2x and no overshoot \xB7 elastic 0.8x and 15-25 % \xB7 fluid 1.5x and 5 % \xB7\npaper 1.0x and 3-5 % \xB7 gas 2.0x and none \xB7 glass 0.9x and none.\n\n**Exits** are 40-50 % shorter than the entrance (0.4 s in, 0.25 s out) and ease in. **Landing\nis longer than leaving.** If entrances feel snappy to the point of glitching, slow the whole\npiece by about 1 s before tuning single moves.\n\n## Brand identity in three constants\n\nA piece (or a brand) has one **signature ease** used for about 80 % of moves, a **three-tier\nduration palette** (for example 200 / 300 / 450 ms) and **one entrance pattern**. Everything else\nis an accent. Write all three in the spec.\n\n| Archetype | Durations | Signature ease | Overshoot |\n|---|---|---|---|\n| Premium | 350-600 ms | (0.4, 0, 0.2, 1) | 0 % |\n| Corporate | 200-400 ms | (0.2, 0, 0, 1) | 0-3 % |\n| Playful | 150-300 ms | back out | 10-20 % |\n| Energetic | 100-250 ms | expo out | 15-30 % |\n\n## Ease by role\n\n| Role | Ease | Bezier |\n|---|---|---|\n| Arrival, hero or title | expo out / quart out | (0.16, 1, 0.3, 1) / (0.25, 1, 0.5, 1) |\n| Ordinary arrival | quad or cubic out | (0.2, 0, 0, 1) |\n| Exit | cubic in | (0.3, 0, 1, 1) |\n| Move between positions | cubic in-out | (0.65, 0, 0.35, 1) |\n| Camera, colour flood, crossfade | sine or quad in-out | (0.37, 0, 0.63, 1) |\n| Zoom-through, push into a cut | cubic in, strong | (0.5, 0, 0.75, 0) |\n| Ambient loop | sine in-out | (0.37, 0, 0.63, 1) |\n| Typing, counters, stepped looks | hold keys / steps | n/a |\n| Rotation, progress, timers | linear | (0, 0, 1, 1) |\n\nNamed presets worth keeping: Material standard (0.2, 0, 0, 1), emphasised (0.05, 0.7, 0.1, 1),\ndecelerate (0, 0, 0, 1), accelerate (0.3, 0, 1, 1); Apple (0.25, 0.1, 0.25, 1); gentle float\n(0.4, 0, 0.2, 1).\n\n**Emotion to motion:** joy, back out at 200-400 ms \xB7 calm, sine at 500-1000 ms \xB7 urgency, ease\nout at 100-200 ms \xB7 sadness, cubic in-out at 600-1200 ms \xB7 surprise, expo out at 150-300 ms \xB7\nelegance, (0.4, 0, 0.2, 1) at 400-700 ms. Angular paths read tense, curved friendly, rising\ngrowth, horizontal progress.\n\n## Springs and overshoot\n\n- Damping ratio 1.0 never bounces \xB7 0.7-0.85 premium \xB7 0.4-0.6 playful \xB7 under 0.3 cartoon.\n- Back-out strength: 1.2 elegant \xB7 1.7-2.0 the usual pop \xB7 2.5 playful.\n- Overshoot budget by context: success 5-10 % \xB7 feedback 2-5 % \xB7 celebration 15-25 % \xB7 error 0 %\n  \xB7 premium 0 %.\n- Only position and scale may overshoot. Opacity, colour and counting numbers never do (an\n  overshooting number reads as wrong data).\n- Press and release: scale 0.88 / 0.92 / 0.96 (dramatic / default / subtle), never below 0.85 or\n  above 0.98; press straight in, release on a spring.\n\n## Classic principles, with numbers\n\n- **Anticipation:** 100-200 ms at 10-20 % of the move, opposite direction. Skip it on moves\n  under 150 ms.\n- **Squash and stretch:** squash [1.2, 0.8], stretch [0.85, 1.15]; impact 2-4 frames, recovery\n  4-8 frames. Keep volume roughly constant.\n- **Follow-through:** children lag 50-150 ms; trailing parts stop 100-200 ms after the lead.\n- **Arcs:** push the path midpoint 10-20 px off the straight line.\n- **Exaggeration:** playful 15-25 % \xB7 energetic 20-30 % \xB7 corporate 0-5 % \xB7 premium 0 %.\n- **Layers of motion:** primary at 100 % amplitude; secondary at 30-50 %, 50-100 ms later, on a\n  different ease; ambient at 10-20 % (only on backgrounds, never on titles or UI).\n\n## Ambient (backgrounds only)\n\nBreathing scale 0.98-1.02 over 2-4 s (beyond \xB15 % it demands attention) \xB7 float \xB15-15 px over\n3-5 s, with layered periods such as 3.5 / 4.0 / 5.5 s so elements never sync \xB7 gradient shift\n8-20 s \xB7 shimmer sweep 1.5-2.5 s with 2-5 s between sweeps \xB7 slow background orbit 3-5\xB0 a\nsecond \xB7 fewer than 20 particles \xB7 ambient energy at most 20 % of the primary motion.\n\n## Motion blur\n\nOnly on fast, short moves (slams, whips, scale punches). Blur peaks at the fastest frame and\nreaches 0 at the settle, on the same ease and window as the move: 6-12 px on text-sized\nelements, 15-20 px full-frame, horizontal-only on a horizontal move. Never on text being read,\nslow moves or fades.\n\n## Milliseconds to frames\n\n| ms | 24 fps | 25 fps | 30 fps | 60 fps |\n|---|---|---|---|---|\n| 100 | 2.4 \u2192 2 | 2.5 \u2192 3 | 3 | 6 |\n| 150 | 3.6 \u2192 4 | 3.75 \u2192 4 | 4.5 \u2192 5 | 9 |\n| 200 | 4.8 \u2192 5 | 5 | 6 | 12 |\n| 250 | 6 | 6.25 \u2192 6 | 7.5 \u2192 8 | 15 |\n| 300 | 7.2 \u2192 7 | 7.5 \u2192 8 | 9 | 18 |\n| 400 | 9.6 \u2192 10 | 10 | 12 | 24 |\n| 500 | 12 | 12.5 \u2192 13 | 15 | 30 |\n| 800 | 19.2 \u2192 19 | 20 | 24 | 48 |\n| 1000 | 24 | 25 | 30 | 60 |\n\nRound to whole frames and keep keys on whole frames (sub-frame keys render unpredictably).\nUnder 24 fps a 100 ms move is two frames and reads as a cut; give it at least three.\n\n**Beat grid:** frames per beat = fps \xD7 60 / BPM. Compute beat *n* as `round(n \xD7 fps \xD7 60 / BPM)`,\nnever by adding a rounded beat repeatedly: at 128 BPM and 30 fps that drifts 2 frames in 32\nbeats. Cut on the beat, change layout on the bar.\n\n## Cubic-bezier to After Effects keyframe ease\n\nA bezier (x1, y1, x2, y2) between key A and key B, with the value changing by \u0394 over duration D\n(so the average speed is \u0394 / D):\n\n- **A, outgoing:** influence = x1 \xD7 100 %, speed = (y1 / x1) \xD7 \u0394 / D.\n- **B, incoming:** influence = (1 \u2212 x2) \xD7 100 %, speed = ((1 \u2212 y2) / (1 \u2212 x2)) \xD7 \u0394 / D.\n\nAE influence must be between 0.1 % and 100 %. A bezier with y outside 0-1 (back, elastic) has no\ntwo-key equivalent: add an overshoot key (for example 105 % at 70 % of the time, then settle) or\nuse a spring expression.\n\n| Ease | A out (influence / speed) | B in (influence / speed) |\n|---|---|---|\n| AE Easy Ease | 33.33 % / 0 | 33.33 % / 0 |\n| (0.2, 0, 0, 1) standard | 20 % / 0 | 100 % / 0 |\n| (0.4, 0, 0.2, 1) premium | 40 % / 0 | 80 % / 0 |\n| (0.16, 1, 0.3, 1) expo out | 16 % / 6.25 \xD7 avg | 70 % / 0 |\n| (0.25, 1, 0.5, 1) quart out | 25 % / 4 \xD7 avg | 50 % / 0 |\n| (0.3, 0, 1, 1) exit | 30 % / 0 | 0.1 % / 2-3 \xD7 avg (it leaves at speed; match the next shot's entry speed) |\n| (0.65, 0, 0.35, 1) in-out | 65 % / 0 | 65 % / 0 |\n\nFor multi-dimensional spatial properties, apply the ease to the speed graph (the whole move),\nnot per axis, unless the dimensions are separated.\n",
-  "references/type-and-layout.md": '# Type, layout and colour\n\n## Sizes\n\n**Floor:** readable text is at least 2.6 % of the frame\'s short side: 28 px at 1080, 50 px at\n1920 wide in a vertical. Check every text layer at its smallest scale on screen.\n\n| Role | Landscape 1920x1080 | Notes |\n|---|---|---|\n| Hero word | fills 60-90 % of the width | 1-2 words |\n| Title | 4-9 % of frame height (64-120 px) | at most 6 words a line |\n| Quiet line, subtitle | 2.5-4 % of height | |\n| Body | 28-42 px | 1-2 lines |\n| Label | 18-24 px only if it is not meant to be read; otherwise 28 px+ | |\n\n- Portrait type is landscape \xD7 1.3 (titles \xD7 1.35, stats \xD7 1.4).\n- Social feed headlines 90 px or more on 1080 wide; full-screen viewing headlines 60 px+, body\n  20 px+ is the absolute floor and only for viewing at full size.\n- Vertical title tiers by line length (1080x1920): 1 short line 118-156 px, line height\n  0.95-1.05 \xB7 a longer single line 96-118 px \xB7 two short lines 78-96 px \xB7 two longer lines\n  62-78 px \xB7 three lines or legal copy 48-62 px. Support text 30-44 px, CTA 28-40 px. 24-48 px\n  between title and support, 40-72 px between support and CTA, at least 72 px from a text block to\n  the edge of its field.\n- Tracking at display sizes \u22120.03 to \u22120.05 em. Weight contrast 300 against 900, not 400 against\n  700. Light text on dark: body weight about 350 and line height 0.05-0.1 more.\n- Numbers that count use tabular figures and round to the displayed precision.\n- Never let the text box be wider than the frame allows: fit it (`ae_fit_text`), don\'t rely on\n  manual line breaks in body copy.\n\n## Reading time\n\n- Hold a line 0.5 s + 0.3 s per word. The last line holds at least 2 s. A one- or two-word chapter\n  line can hold 0.4 s. A key element stays readable at least 0.3 s even in a montage.\n- A typographer\'s check: 3 s on screen must be readable in 2.\n- One line on screen at a time for titles (explainers can run to about 10 words).\n- Text is still before it has to be read. A landed title does not drift, breathe or scale.\n- Exit with a 0.13-0.25 s blur-out or a mirrored move, not a long fade.\n\n## Copy on screen\n\n- One idea per beat. Short, strong words; at most about five words on screen for social.\n- Kinetic type: 3-7 words a scene, 1-2 emphasis words, scenes tagged hook, build, punch, resolve.\n- On-screen text is shorter than the voiceover saying it.\n- Avoid launch clich\xE9s in copy: "introducing", "meet", "unlock", "seamless", "supercharge".\n\n## Safe zones\n\n| Format | Keep text and logos |\n|---|---|\n| Any | inside an 80 % title-safe box (10 % in from each edge) |\n| 16:9 captions | 80-120 px above the bottom |\n| 9:16 reels and shorts (1080x1920) | safe on TikTok, Reels and Shorts: x 120-888, y 288-1248 (approximate, from ad specs; per-app zones in the `captions` skill); below y 840 keep clear of the right rail (end text by x 780); headline around y 360-520 |\n| 9:16 promo layout | CTA, subtitles and proof above the bottom 15 %; the main title above the bottom 22 %; avoid the top 8-10 % |\n| Lower third | inside the bottom 30 %, inside title-safe |\n| Picture-in-picture | inset 28 px from the edges |\n\nBelow y 1248 on a vertical, only texture.\n\n## Layout\n\n- The hero of a shot fills at least 40 % of frame height or width (60-70 % for a single-object\n  shot). Small objects floating in empty space look like a template.\n- At least three layers per scene: background, content, accents. Two focal points at most. Anchor\n  things to edges rather than centring everything.\n- Write the layout as rectangles before building: text box, subject box, quiet zone, safe bottom,\n  motion bounds. A vertical text side often takes 42-48 % of the width as a quiet zone with the\n  subject opposite it, or the subject in the central 60 %.\n- Three or more beats with the same text box, the same entrance and the same rhythm look like\n  slides; change one of them.\n- Hook frames on short vertical pieces put the text impact in the centre or upper centre; keep\n  the lower half for CTA, proof and subject.\n- Overshooting or pulsing elements need clearance at their largest size.\n- Data: one number at a time, the biggest thing on screen, with a proportional visual (bar, ring).\n  Related stats share one visual space; only the value changes. Build a chart in reading order:\n  axis, reference line, data drawing in, one annotation. Highlight one series and grey the rest.\n  Avoid pie charts, dual axes, legends, gridlines and dashboards of six or more panels. Values\n  never change during a morph between chart types. Lines are drawn, not faded in.\n\n## Colour\n\n- Never a flat #000 background, and no full-screen linear gradients on dark: they band in H.264.\n  Use a solid with a glow, or a radial.\n- Atmosphere sits at 15-25 % opacity; 5 % vanishes after compression. Focal elements at full\n  saturation. Tint the neutrals.\n- Contrast for text meets WCAG AA (4.5:1 body, 3:1 large).\n- Move into the "success" colour rather than starting there; flash an error colour, then settle.\n- Over footage, pick the text blend by the brightness behind it: under 60 (of 255) screen, 60-180\n  overlay, over 180 normal with an opaque colour. Plain subtitles over anything brighter than 60\n  get a 30-40 % scrim sized to the text, never a full-width bar.\n'
+    "references/review.md": "# Review: measure, then look\n\nTrust the numbers over your eye, then use your eye for what numbers can't see.\n\n## 1. Measure\n\nRun these before anyone watches it. Each has a fix.\n\n| Check | Fails when | In AE (chroma-ae) |\n|---|---|---|\n| Linear spatial keys | position, scale or rotation of a non-mechanical element moves at constant speed | `ae_motion_review` |\n| Abrupt start or stop | speed jumps from or to zero without an ease | `ae_motion_review` |\n| One ease everywhere | more than two tweens in a scene share the same ease and duration | `ae_get_keyframes` across layers |\n| Wrong direction | an entrance eases in, or an exit eases out | `ae_get_keyframes` |\n| Overshoot where it shouldn't | opacity, colour or a counting number overshoots | `ae_motion_review` |\n| Exit too long | an exit is not 40-50 % shorter than its entrance | keyframe spans |\n| Stagger | sibling start offsets outside the table, or the group spread far over 500 ms | `ae_stagger` plan / keyframe starts |\n| Density | more than a third of a group moving at once | keyframe overlap |\n| First move at 0 | a scene's first move starts on its first frame | keyframe starts |\n| Unread line | a text layer is on screen for less than 0.5 s + 0.3 s per word | text layer in/out and word count |\n| Text below the floor | text under 2.6 % of the short side at its smallest on-screen scale | `ae_check_legibility`, `ae_measure_text` |\n| Outside safe zones | text or logo outside title-safe or the platform's bands | `ae_check_legibility`, `ae_house_style_check` |\n| Overlap | text overlapping text or the subject | `ae_check_text_overlap` |\n| Dead stretch | over 3 s with nothing changing | per-frame change across the timeline |\n| First frame empty | frame 0 is black, empty or a lone logo | `ae_snapshot_frame` at 0 |\n| Silent film | over 15 s with no sound | `ae_audio_analyze` |\n| Loudness | outside \u221216 to \u221214 LUFS or peaks over \u22121 dBTP | `ae_loudness_check` |\n| Loop seam | the last frame of a loop differs from frame 0 | `ae_compare_frames` |\n| Nothing moves | the biggest change against frame 0 is near zero in a \"motion\" piece | `ae_compare_frames` |\n| Late or out of order | an element appears after its intended time, or before one it should follow | markers against layer in-points |\n| Facts | a name or number on screen isn't on the approved list | text layers against the list |\n| Delivery | duration, fps, size, codec, colour range or audio streams differ from the spec | `ae_check_delivery_file`, `ae_verify_render` |\n\n## 2. Look\n\nThree contact sheets:\n\n1. **Beats:** each scene just after it starts, at its middle, and at every beat or hit.\n2. **Seams:** a strip across every cut, from \u22120.2 s to +0.2 s. Look for a jump in position,\n   scale or colour at the seam, a speed mismatch, and a blank midpoint.\n3. **Phone:** the beat frames at 360 px wide, with the sound off.\n\nDescribe each beat frame as a stranger would, in one sentence. Ask: does it read as what it is?\nDoes the subject separate from the background? Is anything you'd have to explain? Would the\npictures alone tell the story? Then the screenshot test: a good motion piece loses meaning when\nreduced to stills; slides don't.\n\nUse the rendered file for this, not the preview: the two can differ. Pull the same frames from\nthe render and compare them.\n\n## 3. Write notes\n\nOne line each:\n\n```\nt=4.2s \xB7 headline \xB7 lands then keeps scaling \u2192 stop the scale key at 4.0s \xB7 keep the ease and timing\n```\n\nRank them **P0** (breaks the read), **P1** (weakens it), **P2** (polish). Don't score out of 10.\nReport only what you actually saw; if there is nothing, say so. If the film feels busy, remove a\nthird of the motion before adding anything.\n\nOptionally ask a fresh agent to critique from only the brief and the sheets, without seeing the\nbuild, then compare.\n\nEnd with a short delivery note: the calls made, what was measured and what was only looked at,\nthe weakest shot, and any warnings deliberately kept and why. Every \"pass\" names the frame and\ntime it was checked on.\n\n## 4. Learn\n\nEach defect found late gets a cause and a rule: add it to the project's `MOTION.md` banned list\nor to the checks above, so it is caught earlier next time. The AE MCP's `ae_learn_taste` and\n`ae_taste_rules` keep these per project.\n\n## Looks generated\n\nThe tells. Any of these in a piece needs a reason.\n\n- Everything fades and slides up; every scene enters the same way; the same ease at 0.5 s on\n  everything.\n- Titles that keep drifting, breathing or scaling after they land; floating or pulsing loops on\n  titles or UI as fake life.\n- Bounce on UI; click rings; typewriter headlines (typing belongs inside an input box); glow and\n  bloom as decoration; gradients on text.\n- A dark void with small centred things; purple-to-blue backgrounds; glass cards; three cards in a\n  row; grids of KPI tiles; HUD corners; a logo docked in a corner.\n- Grey placeholder bars, stock icons, emoji, clip art, rockets and sparkles.\n- A late, slow push-in after the frame has been read.\n- Crossfades between unrelated worlds; a fade out then a fade in at every cut.\n- A pie chart, a legend, gridlines.\n\n## Symptoms to fixes\n\n| It feels | Try |\n|---|---|\n| Robotic | ease every spatial key, add arcs, offset starts by 50-150 ms |\n| Cheap or flat | a secondary layer, follow-through, 3-10 % overshoot on position or scale (not in premium) |\n| Too slow | shorten holds before shortening moves; check the duration tier for the register |\n| Too fast | slow the zooms and pans to about 0.7x, leave the rest |\n| Like slides | enter each scene through an object already on screen; vary the entrances |\n| Busy or distracting | one hero per moment; remove a third of the motion |\n| No personality | pick a register and a signature ease and use it for 80 % of moves |\n| Inconsistent | one duration palette, one entrance pattern, the same ease family per group |\n",
+    "references/sound-and-captions.md": "# Sound and captions\n\n## Voice\n\n- Narration runs 2.2-2.5 words a second. A scene of about 9 s carries about 19 words, 26 at most.\n  A 30-90 s piece is about 155 words or fewer.\n- Script first, then real timings: the recorded (or synthesised) voice's word timestamps set the\n  scene boundaries, not the written estimate. If the voice runs longer than the picture, trim the\n  script; never stretch the motion to fill.\n- Write numbers as they are spoken.\n\n## Music and effects\n\n- Voice leads. Music under voice sits at about 14 % volume and is **carved** (an EQ dip where the\n  voice lives, around 1-4 kHz), not just ducked. Drop the score entirely while the voice must be\n  heard clearly.\n- Music enters on its strongest bar and ends on a bar line with a short fade. Looping beds: 0.4 s\n  fade in, 1.5 s fade out. Anything over 15 s that tells a story gets a bed plus effects.\n- Effects only for real causes on screen: a click, a whoosh on a cut, a key tick, a pop, one\n  riser into the payoff. Each hit sits 3-6 dB above the bed. Rotate two or three takes of a\n  repeated sound.\n- Timing: a sound's peak lands one frame after its picture. A move that lands on a hit starts\n  40-190 ms early; a reaction starts 0-45 ms after it.\n- A bed whose energy is mostly under 150 Hz disappears on phone speakers.\n- A generated score is possible in code (low bed, a hit per shot, a lift at the end): kick as a\n  falling sine, hats as filtered noise, an impact as sub plus noise with a short decay.\n- Audio-reactive motion stays micro: text and logos pulse at most 5 % in scale, backgrounds\n  10-30 %. No equaliser bars, no strobing.\n- Never claim a beat analysis that did not happen; a hand-made beat map is fine if it says so.\n\n## Levels\n\n| Target | Value |\n|---|---|\n| Social and web mix | \u221216 to \u221214 LUFS integrated |\n| True peak | \u22121 dBTP or lower |\n| Speech level in a clean recording | roughly \u221226 to \u221216 dB |\n| Broadcast | the platform's spec (EBU R128 \u221223 LUFS, ATSC A/85 \u221224 LKFS) |\n\nEQ starting points: high-pass at 80 Hz for rumble; reduce mud at 250 Hz, \u22123 dB, Q 1.2; reduce\nboxiness at 400 Hz, \u22123 dB; clarity at 3 kHz, +2.5 dB; soften harshness at 3.2 kHz, \u22123 dB.\nSubtract before adding; the limiter goes last.\n\n## Captions\n\nThe caption rules (standards, reading speed, line breaks, speakers, file formats, tools) live in\nthe `captions` skill. This section covers only how captions meet the motion.\n\n- Time a caption to the speech, then check it against the beat grid: a caption change that lands\n  within a few frames of a cut or a hit looks planned; one that lands just off it looks like a\n  mistake. Move the caption, not the cut.\n- Keep captions out of the action: not over the speaker's mouth or eyes, the hero, or the\n  platform UI. Give them one fixed home so the eye learns where to look.\n- Caption motion is quiet. A fade or a short rise of 100-150 ms is enough; save big moves for\n  the hero. A word highlight starts a frame or two early.\n- One caption style per film: same font, size, colour roles and box. Change it only with the\n  scene, and on purpose.\n- Over footage with a busy background, use a backing box (60% black or more) before reaching for\n  blend modes.\n- Check captions in the silent pass: the film should work with the sound off.\n\n## Review with and without sound\n\nThree passes: **silent** (can the story be followed with the sound off, at phone size?),\n**audio** (do the hits land on their causes?), **frame** (is each hit frame readable as a\nstill?). Say which of these were measured and which were only judged by eye or ear; a loudness\nreading is a measurement, \"the mix sounds fine\" is not.\n",
+    "references/spec.md": "# The spec: MOTION.md\n\nEvery piece gets a `MOTION.md` beside its project (in AE projects, next to the `.aep`). It turns\nthe brief's adjectives into numbers, and it is what the review checks against. Read an existing\none before touching the piece; if the brand has one, copy it in and only add the piece's beats.\n\nFill every field. Where the answer is unknown, write `ASK ME`; never invent a colour or a fact.\n\n```markdown\n# MOTION.md: <piece name>\n\n## Goal\nOne sentence: what the viewer feels or knows at the end.\nAudience: ...   Platform: ...   Sound: on / off by default\n\n## Format\nSize: 1920x1080 | 1080x1920 | 1080x1350 | 1080x1080     Fps: 24 | 25 | 30 | 60\nLength: ... s    Music: ... BPM (or none)    Safe zones: see type-and-layout.md for the format\n\n## Register\nbrand film / premium     (UI micro | brand film | energetic | handmade; at most a 90/10 mix)\n\n## Motion language\nSignature ease: (0.4, 0, 0.2, 1)  for about 80 % of moves\nArrival ease: expo out    Exit ease: cubic in, 40-50 % shorter than entrances\nCamera ease: sine in-out\nDurations: short 300 ms / medium 500 ms / long 800 ms   (in frames: ... / ... / ...)\nStagger: words 80 ms, items 60 ms, group total about 500 ms\nOvershoot: 0 % (position and scale only, never opacity, colour or numbers)\nEntrance pattern: mask reveal from below\nTransitions: primary = <kind> for most seams; accents = <kind>, <kind>; hard cuts at most 1/3\nMotion blur: fast moves only\n\n## Look\nColours (hex, with a role each): background ..., text ..., accent ..., data ...\nType: display <font> <weight>, body <font> <weight>; title ... px, body ... px, floor 2.6 % of short side\nTexture: grain / none     Background: never flat #000\n\n## Facts\nThe approved names, dates and numbers. Nothing else appears on screen.\nSample data: labelled \"illustrative data\" on every frame it appears.\n\n## Banned\nFive things this piece must never do (start from review.md \"Looks generated\").\n\n## Beats\n| # | Time (s or beats) | Role | On screen | Hero frame at | Enter / lock / exit / bridge | Sound |\n|---|---|---|---|---|---|---|\n| 1 | 0-1.2 | hook | ... | 0.8 | ... | hit at 0.8 |\n\n## Checks\nThe measured checks in review.md that apply, and any extra ones for this piece.\n```\n\n## Brand defaults\n\nFor Chroma's own pieces, the register is brand film, premium: signature ease (0.4, 0, 0.2, 1),\nno overshoot, no glow or bounce, type still once landed, colours and fonts from\n`chroma-brand-guidelines`, and the brand's spectrum used once per piece.\n",
+    "references/story-and-pacing.md": "# Story, structure and pacing\n\n## The brief\n\nBefore anything is built, the brief answers:\n\n- **Intent:** what the viewer feels or knows at the end, in one sentence.\n- **Essence:** the core point, the main tension, the emotional centre, the one word to amplify,\n  one visual metaphor.\n- **Format:** size, fps, length, platform, safe zones, sound on or off by default.\n- **Facts:** the approved list of names, dates and numbers that may appear.\n- **Arc** (below), **risks**, and **what must not happen**.\n\nThen a beat sheet: for each beat its time range, on-screen text, the hero-frame time (the frame\nthat has to work as a still), how text enters, locks, is emphasised, exits and bridges to the\nnext beat, and what would be lost if the motion were removed. Show it and wait for approval.\n\nTreat a short prompt as a seed: expand it into a world, a story, keywords, colour, type, shapes,\ncamera and sound, but anything the user specified wins. Don't settle on the safe option.\n\n## Arcs\n\n| Length | Arc |\n|---|---|\n| 10 s | hook, tension, reveal, CTA |\n| 15 s | hook, tension, reveal, proof, CTA |\n| 30 s | pattern interrupt, conflict, reveal, proof, outcome, CTA |\n| Launch, 20-45 s | hook 8 %, tension 12 %, reveal 8 % (placed 20-30 % in), proof 40 %, payoff 20 % (placed 60-80 % in), claim 8 %, end card 8 % (holds 2-3 s) |\n\nNarrative roles for scenes: hook, problem, product intro, key feature, benefits, social proof,\nCTA, brand outro. A product promo climbs a ladder: pain, mechanism, proof, confidence, CTA.\n\n**Reference durations:**\n- 15 s promo: hook 0-3 s, proof 3-11 s at about 2.5 s a point, end card 11-15 s.\n- 45 s launch: 0-4, 4-9, 9-17, 17-22, 22-32, 32-38, 38-45 s; the CTA holds at least 3 s.\n- Apple-style product film: 6-8 scenes of about 2.5 s.\n- Explainer: 8-14 shots, one sentence each; the question shown big and a first surprise within\n  5 s.\n\n## Pacing\n\n- **Hook:** the first readable thing by 0.8-1.2 s (about 0.5 s for an unnarrated sting). The\n  first 0-2 s name the first place the eye goes, the largest word or object, and a motion event\n  that stops the scroll. The first 2 s are the densest. Frame 0 is the thumbnail: never black,\n  never a lone logo.\n- **Rhythm:** shots average 1.8-3 s; montage cuts 0.13-0.8 s; a product demo holds one framing\n  7-10 s; vertical shots 1-2 s with a new beat every 2-4 s. Hold 0.3-0.75 s before a payoff.\n- **Contrast of pace:** fast, stop, explode; dense, release. Alternate high-motion and still\n  beats, and don't give every beat the same length. The slowest scene is about three times the\n  fastest.\n- **Staleness:** something new every 2-4 s. Over 3 s with nothing changing is a dead stretch. A\n  static card dies after about 8 s (stage a reveal inside anything over 15 s). Any single\n  treatment goes stale after about 6 s. Over a talking head, one card every 6-8 s (under a\n  minute), 8-12 s (up to 3 min), 12-20 s (up to 10 min).\n- **Pattern interrupt:** past about 2.5 s, change exactly one thing.\n- **Holds:** title 0.6-1.2 s after it lands \xB7 proof or stat 0.8-1.5 s \xB7 CTA at least 1 s and the\n  calmest hold in the film \xB7 after-state of a transformation at least 1.2 s.\n- **Music-led:** every cut, impact, title entrance and camera switch sits on a beat, half beat or\n  quarter beat. Write times in beats, not seconds.\n\n## Scene recipes\n\n- **Stat:** the count runs 1.2-1.6 s on a decelerating ease, then holds; a ring or bar finishes\n  with the count; the label appears after the number lands (value, then meaning). About 4-6 s in\n  all. No overshoot.\n- **Logo reveal:** 3-5 s. Vector logos draw on; raster logos reveal through a mask or a scale.\n  An underline or light sweep, then hold. Export with alpha for stings.\n- **Lower third:** 3-6 s. A bar wipes in from the left (scale X 0 to 100 %), the text slides up\n  behind it, hold, then slide out. Bottom 30 %, title-safe, alpha.\n- **Highlight a phrase:** the sentence slides up 52 px over 0.8 s (quart out), and after it has\n  settled a highlight band sweeps left to right over 0.5-1.5 s scaled to the phrase length. The\n  text is never zoomed to emphasise it.\n- **Title card (the breather):** one move, then a still hold of 3-5 s.\n- **Kinetic beat slam:** one beat list drives every entrance; each phrase gets its own entrance\n  (scale slam, side snap, rise and rotate), never the same punch-in reused; hits 0.35-0.6 s,\n  exits 0.25 s or less; end on a locked final frame.\n- **Press and success:** container scale 0.9 to 1.0 with 5-10 % overshoot over 200 ms, a tick\n  drawn over 150 ms starting 100 ms later, 400-500 ms in all.\n- **Loading or dashboard build:** skeleton at 0, hero at 100-250 ms, widgets from 200 ms at 60 ms\n  apart, chart at 350 ms, all landed by 500 ms, ambient from 650 ms.\n\n## Variants and references\n\n- Build the first 10 s in two or three styles and choose before building the rest.\n- Breaking down a reference in five lines: pace, what changes, type, colour and light, the one\n  idea. Take moves from a reference video and the look from a still; never copy a logo, copy or\n  palette. Note the exact source, at least three observed visual properties and what must not\n  drift from the story.\n",
+    "references/timing-and-easing.md": "# Timing and easing\n\n## Durations\n\n**By element (UI register):** tooltip 80-120 ms \xB7 button or toggle 120-180 ms \xB7 icon\n150-250 ms \xB7 card 200-350 ms \xB7 modal 300-400 ms \xB7 page 400-600 ms \xB7 dramatic reveal\n600-1200 ms \xB7 ambient loop 2-20 s. Hover under 100 ms, press under 150 ms, settle 200-300 ms,\nerror shake 300-400 ms with 2-3 swings of \xB110-15 px.\n\n**By speed tier (film register):** fast 0.15-0.3 s (energy) \xB7 medium 0.3-0.5 s \xB7 slow\n0.5-0.8 s (luxury) \xB7 very slow 0.8-2.0 s (cinematic). A fast move across the frame is\n0.3-0.6 s. A premium reveal is 0.8-1.6 s. A tween over 2.0 s is usually too slow unless it is a\ncamera drift or an ambient loop.\n\n**By distance:** scale the base duration by 0.8x at 50 px, 1.0x at 100 px, 1.3x at 200 px,\n1.6x at 400 px, 1.8-2.0x across the full frame.\n\n**By material:** rigid 1.2x and no overshoot \xB7 elastic 0.8x and 15-25 % \xB7 fluid 1.5x and 5 % \xB7\npaper 1.0x and 3-5 % \xB7 gas 2.0x and none \xB7 glass 0.9x and none.\n\n**Exits** are 40-50 % shorter than the entrance (0.4 s in, 0.25 s out) and ease in. **Landing\nis longer than leaving.** If entrances feel snappy to the point of glitching, slow the whole\npiece by about 1 s before tuning single moves.\n\n## Brand identity in three constants\n\nA piece (or a brand) has one **signature ease** used for about 80 % of moves, a **three-tier\nduration palette** (for example 200 / 300 / 450 ms) and **one entrance pattern**. Everything else\nis an accent. Write all three in the spec.\n\n| Archetype | Durations | Signature ease | Overshoot |\n|---|---|---|---|\n| Premium | 350-600 ms | (0.4, 0, 0.2, 1) | 0 % |\n| Corporate | 200-400 ms | (0.2, 0, 0, 1) | 0-3 % |\n| Playful | 150-300 ms | back out | 10-20 % |\n| Energetic | 100-250 ms | expo out | 15-30 % |\n\n## Ease by role\n\n| Role | Ease | Bezier |\n|---|---|---|\n| Arrival, hero or title | expo out / quart out | (0.16, 1, 0.3, 1) / (0.25, 1, 0.5, 1) |\n| Ordinary arrival | quad or cubic out | (0.2, 0, 0, 1) |\n| Exit | cubic in | (0.3, 0, 1, 1) |\n| Move between positions | cubic in-out | (0.65, 0, 0.35, 1) |\n| Camera, colour flood, crossfade | sine or quad in-out | (0.37, 0, 0.63, 1) |\n| Zoom-through, push into a cut | cubic in, strong | (0.5, 0, 0.75, 0) |\n| Ambient loop | sine in-out | (0.37, 0, 0.63, 1) |\n| Typing, counters, stepped looks | hold keys / steps | n/a |\n| Rotation, progress, timers | linear | (0, 0, 1, 1) |\n\nNamed presets worth keeping: Material standard (0.2, 0, 0, 1), emphasised (0.05, 0.7, 0.1, 1),\ndecelerate (0, 0, 0, 1), accelerate (0.3, 0, 1, 1); Apple (0.25, 0.1, 0.25, 1); gentle float\n(0.4, 0, 0.2, 1).\n\n**Emotion to motion:** joy, back out at 200-400 ms \xB7 calm, sine at 500-1000 ms \xB7 urgency, ease\nout at 100-200 ms \xB7 sadness, cubic in-out at 600-1200 ms \xB7 surprise, expo out at 150-300 ms \xB7\nelegance, (0.4, 0, 0.2, 1) at 400-700 ms. Angular paths read tense, curved friendly, rising\ngrowth, horizontal progress.\n\n## Springs and overshoot\n\n- Damping ratio 1.0 never bounces \xB7 0.7-0.85 premium \xB7 0.4-0.6 playful \xB7 under 0.3 cartoon.\n- Back-out strength: 1.2 elegant \xB7 1.7-2.0 the usual pop \xB7 2.5 playful.\n- Overshoot budget by context: success 5-10 % \xB7 feedback 2-5 % \xB7 celebration 15-25 % \xB7 error 0 %\n  \xB7 premium 0 %.\n- Only position and scale may overshoot. Opacity, colour and counting numbers never do (an\n  overshooting number reads as wrong data).\n- Press and release: scale 0.88 / 0.92 / 0.96 (dramatic / default / subtle), never below 0.85 or\n  above 0.98; press straight in, release on a spring.\n\n## Classic principles, with numbers\n\n- **Anticipation:** 100-200 ms at 10-20 % of the move, opposite direction. Skip it on moves\n  under 150 ms.\n- **Squash and stretch:** squash [1.2, 0.8], stretch [0.85, 1.15]; impact 2-4 frames, recovery\n  4-8 frames. Keep volume roughly constant.\n- **Follow-through:** children lag 50-150 ms; trailing parts stop 100-200 ms after the lead.\n- **Arcs:** push the path midpoint 10-20 px off the straight line.\n- **Exaggeration:** playful 15-25 % \xB7 energetic 20-30 % \xB7 corporate 0-5 % \xB7 premium 0 %.\n- **Layers of motion:** primary at 100 % amplitude; secondary at 30-50 %, 50-100 ms later, on a\n  different ease; ambient at 10-20 % (only on backgrounds, never on titles or UI).\n\n## Ambient (backgrounds only)\n\nBreathing scale 0.98-1.02 over 2-4 s (beyond \xB15 % it demands attention) \xB7 float \xB15-15 px over\n3-5 s, with layered periods such as 3.5 / 4.0 / 5.5 s so elements never sync \xB7 gradient shift\n8-20 s \xB7 shimmer sweep 1.5-2.5 s with 2-5 s between sweeps \xB7 slow background orbit 3-5\xB0 a\nsecond \xB7 fewer than 20 particles \xB7 ambient energy at most 20 % of the primary motion.\n\n## Motion blur\n\nOnly on fast, short moves (slams, whips, scale punches). Blur peaks at the fastest frame and\nreaches 0 at the settle, on the same ease and window as the move: 6-12 px on text-sized\nelements, 15-20 px full-frame, horizontal-only on a horizontal move. Never on text being read,\nslow moves or fades.\n\n## Milliseconds to frames\n\n| ms | 24 fps | 25 fps | 30 fps | 60 fps |\n|---|---|---|---|---|\n| 100 | 2.4 \u2192 2 | 2.5 \u2192 3 | 3 | 6 |\n| 150 | 3.6 \u2192 4 | 3.75 \u2192 4 | 4.5 \u2192 5 | 9 |\n| 200 | 4.8 \u2192 5 | 5 | 6 | 12 |\n| 250 | 6 | 6.25 \u2192 6 | 7.5 \u2192 8 | 15 |\n| 300 | 7.2 \u2192 7 | 7.5 \u2192 8 | 9 | 18 |\n| 400 | 9.6 \u2192 10 | 10 | 12 | 24 |\n| 500 | 12 | 12.5 \u2192 13 | 15 | 30 |\n| 800 | 19.2 \u2192 19 | 20 | 24 | 48 |\n| 1000 | 24 | 25 | 30 | 60 |\n\nRound to whole frames and keep keys on whole frames (sub-frame keys render unpredictably).\nUnder 24 fps a 100 ms move is two frames and reads as a cut; give it at least three.\n\n**Beat grid:** frames per beat = fps \xD7 60 / BPM. Compute beat *n* as `round(n \xD7 fps \xD7 60 / BPM)`,\nnever by adding a rounded beat repeatedly: at 128 BPM and 30 fps that drifts 2 frames in 32\nbeats. Cut on the beat, change layout on the bar.\n\n## Cubic-bezier to After Effects keyframe ease\n\nA bezier (x1, y1, x2, y2) between key A and key B, with the value changing by \u0394 over duration D\n(so the average speed is \u0394 / D):\n\n- **A, outgoing:** influence = x1 \xD7 100 %, speed = (y1 / x1) \xD7 \u0394 / D.\n- **B, incoming:** influence = (1 \u2212 x2) \xD7 100 %, speed = ((1 \u2212 y2) / (1 \u2212 x2)) \xD7 \u0394 / D.\n\nAE influence must be between 0.1 % and 100 %. A bezier with y outside 0-1 (back, elastic) has no\ntwo-key equivalent: add an overshoot key (for example 105 % at 70 % of the time, then settle) or\nuse a spring expression.\n\n| Ease | A out (influence / speed) | B in (influence / speed) |\n|---|---|---|\n| AE Easy Ease | 33.33 % / 0 | 33.33 % / 0 |\n| (0.2, 0, 0, 1) standard | 20 % / 0 | 100 % / 0 |\n| (0.4, 0, 0.2, 1) premium | 40 % / 0 | 80 % / 0 |\n| (0.16, 1, 0.3, 1) expo out | 16 % / 6.25 \xD7 avg | 70 % / 0 |\n| (0.25, 1, 0.5, 1) quart out | 25 % / 4 \xD7 avg | 50 % / 0 |\n| (0.3, 0, 1, 1) exit | 30 % / 0 | 0.1 % / 2-3 \xD7 avg (it leaves at speed; match the next shot's entry speed) |\n| (0.65, 0, 0.35, 1) in-out | 65 % / 0 | 65 % / 0 |\n\nFor multi-dimensional spatial properties, apply the ease to the speed graph (the whole move),\nnot per axis, unless the dimensions are separated.\n",
+    "references/type-and-layout.md": '# Type, layout and colour\n\n## Sizes\n\n**Floor:** readable text is at least 2.6 % of the frame\'s short side: 28 px at 1080, 50 px at\n1920 wide in a vertical. Check every text layer at its smallest scale on screen.\n\n| Role | Landscape 1920x1080 | Notes |\n|---|---|---|\n| Hero word | fills 60-90 % of the width | 1-2 words |\n| Title | 4-9 % of frame height (64-120 px) | at most 6 words a line |\n| Quiet line, subtitle | 2.5-4 % of height | |\n| Body | 28-42 px | 1-2 lines |\n| Label | 18-24 px only if it is not meant to be read; otherwise 28 px+ | |\n\n- Portrait type is landscape \xD7 1.3 (titles \xD7 1.35, stats \xD7 1.4).\n- Social feed headlines 90 px or more on 1080 wide; full-screen viewing headlines 60 px+, body\n  20 px+ is the absolute floor and only for viewing at full size.\n- Vertical title tiers by line length (1080x1920): 1 short line 118-156 px, line height\n  0.95-1.05 \xB7 a longer single line 96-118 px \xB7 two short lines 78-96 px \xB7 two longer lines\n  62-78 px \xB7 three lines or legal copy 48-62 px. Support text 30-44 px, CTA 28-40 px. 24-48 px\n  between title and support, 40-72 px between support and CTA, at least 72 px from a text block to\n  the edge of its field.\n- Tracking at display sizes \u22120.03 to \u22120.05 em. Weight contrast 300 against 900, not 400 against\n  700. Light text on dark: body weight about 350 and line height 0.05-0.1 more.\n- Numbers that count use tabular figures and round to the displayed precision.\n- Never let the text box be wider than the frame allows: fit it (`ae_fit_text`), don\'t rely on\n  manual line breaks in body copy.\n\n## Reading time\n\n- Hold a line 0.5 s + 0.3 s per word. The last line holds at least 2 s. A one- or two-word chapter\n  line can hold 0.4 s. A key element stays readable at least 0.3 s even in a montage.\n- A typographer\'s check: 3 s on screen must be readable in 2.\n- One line on screen at a time for titles (explainers can run to about 10 words).\n- Text is still before it has to be read. A landed title does not drift, breathe or scale.\n- Exit with a 0.13-0.25 s blur-out or a mirrored move, not a long fade.\n\n## Copy on screen\n\n- One idea per beat. Short, strong words; at most about five words on screen for social.\n- Kinetic type: 3-7 words a scene, 1-2 emphasis words, scenes tagged hook, build, punch, resolve.\n- On-screen text is shorter than the voiceover saying it.\n- Avoid launch clich\xE9s in copy: "introducing", "meet", "unlock", "seamless", "supercharge".\n\n## Safe zones\n\n| Format | Keep text and logos |\n|---|---|\n| Any | inside an 80 % title-safe box (10 % in from each edge) |\n| 16:9 captions | 80-120 px above the bottom |\n| 9:16 reels and shorts (1080x1920) | safe on TikTok, Reels and Shorts: x 120-888, y 288-1248 (approximate, from ad specs; per-app zones in the `captions` skill); below y 840 keep clear of the right rail (end text by x 780); headline around y 360-520 |\n| 9:16 promo layout | CTA, subtitles and proof above the bottom 15 %; the main title above the bottom 22 %; avoid the top 8-10 % |\n| Lower third | inside the bottom 30 %, inside title-safe |\n| Picture-in-picture | inset 28 px from the edges |\n\nBelow y 1248 on a vertical, only texture.\n\n## Layout\n\n- The hero of a shot fills at least 40 % of frame height or width (60-70 % for a single-object\n  shot). Small objects floating in empty space look like a template.\n- At least three layers per scene: background, content, accents. Two focal points at most. Anchor\n  things to edges rather than centring everything.\n- Write the layout as rectangles before building: text box, subject box, quiet zone, safe bottom,\n  motion bounds. A vertical text side often takes 42-48 % of the width as a quiet zone with the\n  subject opposite it, or the subject in the central 60 %.\n- Three or more beats with the same text box, the same entrance and the same rhythm look like\n  slides; change one of them.\n- Hook frames on short vertical pieces put the text impact in the centre or upper centre; keep\n  the lower half for CTA, proof and subject.\n- Overshooting or pulsing elements need clearance at their largest size.\n- Data: one number at a time, the biggest thing on screen, with a proportional visual (bar, ring).\n  Related stats share one visual space; only the value changes. Build a chart in reading order:\n  axis, reference line, data drawing in, one annotation. Highlight one series and grey the rest.\n  Avoid pie charts, dual axes, legends, gridlines and dashboards of six or more panels. Values\n  never change during a morph between chart types. Lines are drawn, not faded in.\n\n## Colour\n\n- Never a flat #000 background, and no full-screen linear gradients on dark: they band in H.264.\n  Use a solid with a glow, or a radial.\n- Atmosphere sits at 15-25 % opacity; 5 % vanishes after compression. Focal elements at full\n  saturation. Tint the neutrals.\n- Contrast for text meets WCAG AA (4.5:1 body, 3:1 large).\n- Move into the "success" colour rather than starting there; flash an error colour, then settle.\n- Over footage, pick the text blend by the brightness behind it: under 60 (of 255) screen, 60-180\n  overlay, over 180 normal with an opaque colour. Plain subtitles over anything brighter than 60\n  get a 30-40 % scrim sized to the text, never a full-width bar.\n'
+  }
 };
-var CAPTIONS_GUIDANCE_FILES = {
-  "NOTICE.md": "# Sources and licences\n\nThis skill is Chroma's own synthesis, written in its own words. Standards are cited by number\nand link; no style guide is quoted at length. Researched 2026-11-06.\n\n## Standards and guides (facts and numbers, linked)\n\n| Source | Used for |\n|---|---|\n| [Netflix English (USA) Timed Text Style Guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977-English-USA-Timed-Text-Style-Guide) | 20 / 17 cps, 42 characters, 2 lines, duration limits, SDH conventions |\n| [Netflix Subtitle Timing Guidelines](https://partnerhelp.netflixstudios.com/hc/en-us/articles/360051554394-Timed-Text-Style-Guide-Subtitle-Timing-Guidelines) | minimum gap, closing gaps, shot-change rules |\n| [BBC Subtitle Guidelines](https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/) | words per minute, line length, gaps, synchronisation, speaker colours |\n| [DCMP Captioning Key](https://dcmp.org/learn/597-captioning-key---text) | 32 characters, minimum and maximum duration, presentation rates |\n| [Ofcom TV access services](https://www.ofcom.org.uk/tv-radio-and-on-demand/information-for-industry/guidance/tv-access-services) | UK broadcast subtitling duties and quality expectations |\n| [W3C WCAG 2.2](https://www.w3.org/TR/WCAG22/) (1.2.2, 1.2.4, 1.4.3) | caption requirements and the 4.5:1 text contrast |\n| ITU-R BT.1359-1 | audio/video sync tolerances |\n\n## Skills and projects whose ideas were adapted\n\n| Source | Licence | Used for |\n|---|---|---|\n| [github/awesome-copilot: caption-qa](https://github.com/github/awesome-copilot) | MIT | the idea of a per-standard lint (cps, line length, duration, gaps), \"retime before rewording\", default-standard rule |\n| [vargHQ/skills: caption-styles](https://github.com/vargHQ/skills) | MIT | caption style families for social, and how they differ in chunk size |\n| [clueso-ai/skills: add-ai-captions, add-animated-captions](https://github.com/clueso-ai/skills) | Apache-2.0 | workflow order (transcribe, review, style, burn in) and animated word-highlight options |\n| [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes) (captions references and rules) | Apache-2.0, (c) HeyGen | Whisper failure modes (invented text over silence, `.en` models translating, over 20% music-note tokens), word grouping by energy, the plain-sidecar habit |\n| [Remotion captions](https://www.remotion.dev/docs/captions) | documentation, linked only | what `createTikTokStyleCaptions` does |\n\n## Ideas only (no licence stated in the downloaded copy; nothing copied)\n\n45ck/content-machine karaoke-ass-captions, AI-Builder-Club karaoke-captions, HUSS41N\nshorts-text-safe-zones, JosiahSiegel viral-video-animated-captions, appariciojunior captions,\nbrowser-use video-use, calesthio captions-media-accessibility, damionrashford ffmpeg-captions,\nkatareayush video-captions, lattifai omnicaptions, social-media-skills captions-and-clipping,\nvideo-db video-subtitles. Read for the shape of the problem (karaoke timing, safe zones, ffmpeg\nburn-in); every rule here was re-derived from the published standards above.\n\nA commercial caption product's marketing page was read for feature ideas only (word-level\nediting, per-standard checks). Nothing copied.\n\n## Numbers computed here\n\nContrast figures for a black box behind white text were computed with the WCAG relative\nluminance formula (`references/sdh-and-speakers.md` states the background they assume).\nPlatform UI zones are approximate, from ad specs and third-party templates.\n",
-  "SKILL.md": "---\nname: captions\ndescription: Make, check and ship captions and subtitles that meet a published standard: transcribe, chunk, time, break lines, style, QA and export. Use for captions, subtitles, SDH, closed captions, open captions, burn-in, SRT, VTT, WebVTT, TTML, IMSC, SCC, karaoke captions, word highlight, kinetic captions, social captions, TikTok / Reels / Shorts captions, transcript, transcribe, Whisper, ElevenLabs Scribe, reading speed, cps, line breaks, caption QA, safe zone, Netflix / BBC / DCMP / Ofcom standards, accessibility and WCAG, in After Effects (chroma-ae MCP), Premiere, Remotion, HyperFrames or any other tool. Trigger phrases: 'add captions', 'subtitle this', 'caption this reel', 'burn in subtitles', 'make an SRT', 'check these captions', 'too fast to read', 'TikTok captions', 'word by word captions', 'accessible captions'.\nmetadata:\n  version: \"1.0.0\"\n  sources: see NOTICE.md\n---\n\n# Captions\n\nOne skill for turning speech into captions that people can read, from a transcript to a delivered\nfile. The rules are numbers from published guides, so a caption can be measured, not admired.\nWritten in Chroma's own words; sources and licences are in `NOTICE.md`.\n\n**Load only what the task needs:**\n\n| Task | Read |\n|---|---|\n| Which limits apply; sources and links | `references/standards.md` |\n| Chunking, timing, gaps, line breaks, shot changes | `references/timing-and-breaks.md` |\n| Sound events, speakers, colours, music, contrast | `references/sdh-and-speakers.md` |\n| 9:16 reels, shorts, word highlight, platform zones | `references/social-and-platforms.md` |\n| Transcribing, Whisper and Scribe failure modes, clean-up | `references/asr.md` |\n| SRT, WebVTT, TTML/IMSC, SCC, sidecars, After Effects limits | `references/formats.md` |\n| Doing it with the chroma-ae MCP tools, Remotion, HyperFrames | `references/chroma-ae-workflow.md` |\n\nFor motion rules around captions (beats, keeping them out of the action), see\n`chroma-motion-director` (`references/sound-and-captions.md`). This skill owns the caption rules.\n\n## Pick the destination first\n\nNo target means no answer to \"are these captions OK?\". Ask, or state the default you used.\n\n| Destination | Standard | Notes |\n|---|---|---|\n| Netflix, streaming, most online video | Netflix English (adult) | the default when nothing is named |\n| Children's programmes | Netflix English (children's) | 17 cps instead of 20 |\n| UK broadcast and iPlayer-style delivery | BBC | words per minute, 37 characters broadcast |\n| US education, training, e-learning | DCMP Captioning Key | 32 characters, slower rates |\n| 9:16 social (TikTok, Reels, Shorts) | house social preset | short chunks, platform safe zones |\n| Legal or accessibility claim | WCAG 2.x plus the above | 1.2.2 (A) prerecorded, 1.2.4 (AA) live |\n\n## Key numbers\n\n| Rule | Netflix adult | Netflix kids | BBC | DCMP |\n|---|---|---|---|---|\n| Reading speed | 20 cps | 17 cps | 160-180 wpm (about 0.33 s a word) | 130-160 wpm by level |\n| Characters per line | 42 | 42 | 37 broadcast; online 68% of a 16:9 frame | 32 |\n| Lines | 2 | 2 | 2 | 2 |\n| Shortest caption | 20 frames at 24 fps (5/6 s) | same | not fixed | 40 frames |\n| Longest caption | 7 s | 7 s | not fixed | 6 s |\n| Gap between captions | 2 frames minimum | same | if a pause is left, 1 s or more (1.5 s better) | not fixed |\n\nFull table with links: `references/standards.md`.\n\nAlways:\n- Appear on speech onset (or a frame or two before); linger about 0.5 s after speech where space allows.\n- Two lines at most, bottom-heavy (the lower line longer) when both are needed.\n- Break at grammar, not at the character count (`references/timing-and-breaks.md`).\n- Colour is never the only cue for a speaker (colour-blind viewers, monochrome sets).\n- Text contrast 4.5:1 or better; a black box behind the text at 60% opacity or more (75% over busy footage).\n- Ship a plain sidecar (SRT or VTT) next to any burned-in version.\n- Review every name, number and brand word by eye. Speech-to-text gets them wrong with confidence.\n\n## The workflow\n\nSeven steps. In After Effects each maps to a chroma-ae tool (`references/chroma-ae-workflow.md`).\n\n1. **Destination and style.** Standard preset, caption kind (subtitle-style, phrase chunks, single\n   word), language, SDH or dialogue only.\n2. **Transcribe, or take the client's file.** Transcribing with Scribe sends the audio to a\n   third-party service: ask first. A supplied SRT or VTT skips this step.\n3. **Read the transcript.** Invented lines over silence or music, wrong language, lost\n   punctuation, names. Fix before chunking, not after (`references/asr.md`).\n4. **Plan against the standard, with cut times.** Chunk, break, time, merge, then list what\n   changed and what still violates. Give the planner the shot changes so it can respect them.\n5. **Review the plan.** Read the change list and every violation. A violation that retiming\n   cannot fix is a rewording decision for a human; never silently cut the speaker's words.\n6. **Write the captions** into the comp (layers, one layer, per word, or a template), inside the\n   platform safe zones, with a backing box if the footage is busy.\n7. **Check, export, look.** Read them back, lint against the standard again, export the sidecar,\n   then look at frames (first caption, a two-line caption, the fastest caption, a cut, the last\n   caption) at phone width. Say which checks were measured and which were only looked at.\n\n## Chunking modes\n\n| Mode | Shape | Use for | Avoid for |\n|---|---|---|---|\n| Subtitle-style | 1-2 lines, a full phrase, standard limits | dialogue, interviews, anything going to a platform or broadcaster | nothing; the safe default |\n| Phrase chunks | 2-4 words at a time, capped with `max_words` | punchy social edits, product films, explainers | fast speech with long sentences |\n| Single word | one word at a time | very short hooks and slogans (under about 8 words) | anything longer; fast speech |\n\nSingle-word display hurts comprehension: no word lands next to its neighbours, viewers who read\nahead lose the line, and fast speech flashes words for under 8 frames. Two to four words is the\nworking minimum for speech. Merge any word shorter than 8 frames into its neighbour. Keep numbers\nwith their units (\"40 per cent\", \"3 million\") and names together. Start a word highlight a frame\nor two early so it reads as in sync, not late.\n\n## Common mistakes\n\n- Using 42 characters per line for 9:16 social; a portrait phone line holds about 25 (`references/social-and-platforms.md`).\n- Burning in with no sidecar. Nobody can then fix a typo, translate, or search the text.\n- Trusting word timestamps to the frame; they drift 50-100 ms.\n- Ending a line on \"the\", \"of\", \"and\", \"to\", \"I\", or splitting a first name from its surname.\n- Captions over the platform UI (bottom 660-672 px, right-hand button column on 1080x1920).\n- Red and green speaker colours with no label.\n- Fitting the reading speed but ignoring the cut: a caption that straddles a shot change by two frames flashes.\n",
-  "references/asr.md": '# Speech to text\n\n## Which tool\n\n- `ae_transcribe` uses ElevenLabs Scribe. It uploads the audio to a third-party service. For\n  client audio, ask first, then pass `confirm_upload: true`.\n- Whisper (local, open) keeps audio on the machine. Choose it for confidential work.\n- A client-supplied SRT or VTT is better than either; use it and skip transcription.\n\n## Failure modes (read the transcript before using it)\n\n| Failure | Sign | Response |\n|---|---|---|\n| Invented text over silence or music (hallucination) | "Thank you.", "Thanks for watching", repeated lines, words starting inside a silent tail | drop words starting inside silence below about -35 dB for 0.6 s or more (`cleanup`) |\n| `.en` models translating non-English audio | English output for foreign speech | use a multilingual model and set the language |\n| Word timestamp drift | words 50-100 ms off the audio | nudge the whole track; do not trust the frame |\n| Word-level output loses punctuation and casing | a stream of lowercase words | restore from sentence-level output or a script, then chunk |\n| Music-note tokens | more than 20% of tokens are note symbols or `?` blocks | retry with a different or larger model, or take lyrics from the person |\n| Unspaced scripts (Chinese, Japanese) | a whole sentence as one word, wrong script | split into short phrases and spread the time by character count; check characters |\n| Names, numbers, brands | confident but wrong | always review by eye |\n| Speaker labels | missing or swapped | add by hand for SDH |\n\n## Clean-up options\n\n`ae_captions_plan` takes a `cleanup` option to drop non-word tokens, drop words inside trailing\nsilence, and merge fragments, and reports what it removed in the `CleanupReport`. It does not\ncheck spelling or meaning.\n\n## Review pass\n\nWatch it once with sound at normal speed with the captions on. Note: every proper name, every\nnumber, every place the caption disagrees with what was said, every caption on screen over music\nor silence. Fix the transcript, then plan.\n',
-  "references/chroma-ae-workflow.md": '# Doing it with the chroma-ae MCP tools\n\nTool names are exact. Read each tool\'s own description for its full input shape; this page\nsays when to use which.\n\n| Tool | Does |\n|---|---|\n| `ae_transcribe` | ElevenLabs Scribe word-level transcript of a comp\'s audio (rendered in the background) or an audio/video file. Uploads client audio to a third-party US service: ask first, then `confirm_upload: true`. Returns `transcript_path` and `offset` for the planner |\n| `ae_captions_plan` | chunks, breaks and times words against a standard; returns the plan, the `changes` and the `violations`. Writes nothing |\n| `ae_detect_cuts` | finds shot changes; `mode: "list"` returns the cut times for `cut_times` |\n| `ae_captions` | writes captions to the comp (guarded, one undo step) |\n| `ae_captions_read` | reads existing captions back: text, timing, extents against the safe area |\n| `ae_captions_qa` | lints an SRT/VTT file, a plan or the caption layers against a standard |\n| `ae_captions_export` | writes an SRT, VTT or TTML sidecar, by default next to the project |\n| `ae_export_mogrt` | exports a template comp (from `ae_captions` `make_template`) as a .mogrt for Premiere |\n\n## ae_captions_plan options (ae_captions takes the same)\n\n| Option | Values and use |\n|---|---|\n| `standard` | `netflix_adult`, `netflix_kids`, `bbc`, `dcmp`, `social_9x16`: sets the limits and turns on fixing |\n| `fix` | default true with a standard: extend, then merge, then split; `false` only reports |\n| `min_gap_frames`, `close_gaps_under` | gap rules (default 2 frames; gaps under 0.5 s close to 2 frames) |\n| `cut_times` | shot changes from `ae_detect_cuts` (comp seconds); in/out times respect them |\n| `cleanup` | `drop_after_s`, `drop_music_tokens`, `min_word_s`, `remove_fillers`, `remove_stutters`, `glossary`, `case`, `strip_punctuation` |\n| `max_words` | cap on words per caption (phrase chunks) |\n| `single_word` | one word at a time (hooks only); short words merge, names and numbers stay whole |\n| `highlight_lead_frames` | how many frames early a word highlight starts (default 1) |\n| `speaker_style` | `color` (BBC order), `hyphen` (two speakers, one caption), `label` (`NAME: `); `speaker_names`, `speaker_colors` |\n| `accessibility` | never colour alone: adds a label at each speaker change when `speaker_style` is `color` |\n| `sdh` | `sound_events` (default on: `[laughter]` captions from ElevenLabs audio events), `lyric_ranges` (italic, music notes) |\n| `transcript.offset` | the `offset` that `ae_transcribe` returns |\n\n## ae_captions modes\n\n| `mode` | Result | Use for |\n|---|---|---|\n| `layers` | one text layer per caption | most work; easy to edit and animate per caption |\n| `single` | one text layer whose text changes over time | clean timeline, simple styles |\n| `words` | one layer per word, laid out as the caption; words build on as spoken | per-word animation |\n| `template` | one instance per caption of an Essential Graphics template comp, its fields (e.g. "Line 1", "Line 2") filled | brand-styled designs |\n\nOther options: `platform` (`reels_9_16` = safe on all three apps, the 9:16 default; `tiktok_9_16`,\n`instagram_reels_9_16`, `youtube_shorts_9_16`), `parent_to_null` (one null moves the whole set),\n`precompose`, `match: "time"` (update existing captions by time instead of by name), `highlight`\n(the current word), `look` (`pop`, `pill_slide`, `fill_sweep`, with `look_options`), `box` (the\nbacking box; 60% opacity or more), and `make_template` (a styled caption comp with Essential\nGraphics controllers, then `ae_save` and `ae_export_mogrt` for Premiere).\n\n## Recommended workflow\n\n1. `ae_transcribe` (after asking) or take the client\'s SRT.\n2. Read the transcript; fix the problems in `asr.md`.\n3. `ae_detect_cuts` with `mode: list` to get `cut_times`.\n4. `ae_captions_plan` with a standard, `cut_times`, `cleanup`, and the chunking options.\n5. Read the changes and the violations. Decide the rewordings a human has to make.\n6. `ae_captions` to write (layers, single, words or template), with the platform zone and box.\n7. `ae_captions_read` to confirm what is in the comp, then `ae_captions_qa` against the standard.\n8. `ae_captions_export` for the SRT or VTT sidecar.\n9. Look at frames: `ae_contact_sheet` or `ae_snapshot_frame` at the first caption, the busiest,\n   a cut, and the last. Check at phone width.\n\n## Other tools\n\n- Remotion: `@remotion/captions` defines a `Caption` type and parsers; `createTikTokStyleCaptions`\n  groups words into pages that switch on a time window (a combine-tokens-within-milliseconds\n  setting controls chunk size). See the [Remotion captions docs](https://www.remotion.dev/docs/captions)\n  and the `remotion-captions` skill. It does not enforce a broadcast standard; run the numbers\n  from this skill over its output.\n- HyperFrames ([heygen-com/hyperframes](https://github.com/heygen-com/hyperframes), Apache-2.0)\n  has a `transcribe` command that writes word timings (and `--to srt` or `--to vtt` sidecars) and a\n  caption-style registry. Its default model translates non-English speech to English; pass the\n  model and language explicitly (`asr.md`).\n',
-  "references/formats.md": "# File formats\n\nAlways ship a plain sidecar next to a burned-in version. It can be fixed, translated, searched\nand read by assistive tech. The burned-in file cannot.\n\n| Format | Use | Gotchas |\n|---|---|---|\n| SRT | the universal sidecar | see below |\n| WebVTT (.vtt) | web video, HTML5 `<track>` | see below |\n| TTML / IMSC | broadcast and streaming delivery | see below |\n| SCC (CEA-608) | US broadcast and legacy | see below |\n\n## SRT\n\n- Numbered cues, a timecode line, text, a blank line.\n- Timecode `00:00:01,000 --> 00:00:03,500`: a comma before the milliseconds.\n- UTF-8 (no byte-order mark if the player is picky).\n- No styling standard. `<i>` works in many players but is not part of the format; test the\n  target. Colours and positions do not travel.\n- Cue numbers must run in order, times must not go backwards.\n\n## WebVTT\n\n- First line `WEBVTT`, then a blank line.\n- Timecode with a period: `00:00:01.000 --> 00:00:03.500`; hours may be dropped.\n- Cue settings after the times: `line`, `position`, `align`, `size`.\n- `<v Name>` voice spans identify speakers; `<i>`, `<b>`, `<c.class>` allowed.\n- Style with `::cue` CSS. Support differs by player.\n- `NOTE` blocks are comments.\n\n## TTML and IMSC\n\n- XML. Regions use `tts:origin` and `tts:extent` in percent, so they scale with the frame.\n- `ttp:timeBase` (media, smpte); `ttp:frameRate` for frame timing; check the profile\n  (IMSC1 text or image) the receiver needs.\n- Styles are explicit in the file; BBC's guide gives the EBU-TT-D details for online delivery.\n- A schema-valid file can still be rejected by a platform's own checker.\n\n## SCC (CEA-608)\n\n- Frame-based timecode, usually 29.97 drop-frame (semicolon before frames).\n- 32 columns by 15 rows on screen; for pop-on captions, 2-4 lines are usable in practice.\n- Heavy character restrictions; no full Unicode. Treat it as a delivery conversion, not an\n  authoring format.\n\n## After Effects\n\nAfter Effects has no native SRT or VTT import. The chroma-ae MCP parses transcripts in Node\n(`ae_captions` takes cues; `ae_captions_read` gives them back) and builds text layers. A caption\nset in After Effects can be exported again as SRT, VTT or TTML with `ae_captions_export`. For\nPremiere, `ae_export_mogrt` makes a caption template; Premiere's own caption track takes\nSRT or VTT.\n",
-  "references/sdh-and-speakers.md": "# SDH, speakers and contrast\n\nSDH (subtitles for the deaf and hard of hearing) adds what the ear gets and the eye does not.\nPlain captions carry dialogue only. State which you are making.\n\n## Sound events\n\n- In square brackets, lower case: [door slams], [phone buzzing], [applause].\n- Only sounds that matter to the story or the mood. Not every footstep.\n- Put it on its own caption or its own line, timed to the sound.\n- Off-screen speech: the speaker's name in brackets before it, or a colour, plus position if\n  the format allows. Narrator: [Narrator] or the narrator colour.\n- Tone only where the words do not carry it: [sarcastically], [whispering].\n- Do not describe the picture.\n\n## Music\n\n- Song lyrics: italic, with a music note (a note symbol) at the start of each caption and at the\n  end of the last line of the lyric.\n- Instrumental that matters: [tense music] or [upbeat music playing].\n- Silence that matters: [silence]. Rare.\n\n## Speakers\n\n- Two people in one caption: a hyphen at the start of each line, one speaker per line.\n- A new speaker starts a new caption where it can, so the colour or label change is clear.\n- Name labels (\"MARCUS:\") on first appearance when the speaker is off-screen or unclear.\n\n### Speaker colours\n\nBBC's order for identifying speakers is white first, then yellow, cyan, green:\n\n| Order | Colour | Hex |\n|---|---|---|\n| 1 | white | #FFFFFF |\n| 2 | yellow | #FFFF00 |\n| 3 | cyan | #00FFFF |\n| 4 | green | #00FF00 |\n\nBy BBC convention a narrator takes yellow. Reuse a colour for the same person through the whole\npiece.\n\nColour must never be the only cue. About 1 man in 12 has a colour-vision deficiency, and many\nplayers and monochrome displays drop colour. Pair every colour with a label, a hyphen, or a\nposition. Chroma's `speaker_style` option in `ae_captions_plan` takes a colour, label or dash\nstyle; for accessibility work use a combination.\n\n## Contrast\n\nText against its background: 4.5:1 or better (WCAG 1.4.3; large text 3:1). Over moving footage,\nput a box behind the text rather than hoping the picture behaves.\n\nWhite text over a black box, WCAG contrast ratio by box opacity. Computed with the WCAG\nluminance formula for a pure white backdrop behind the box, which is the worst case (a bright\nsky or a white wall):\n\n| Box opacity | Contrast | Verdict |\n|---|---|---|\n| 50% | about 4.0:1 | fails 4.5:1 |\n| 60% | about 5.7:1 | passes |\n| 75% | about 10.4:1 | passes with margin |\n\nOver a mid-tone image (a mid-grey around sRGB 128), the same boxes score higher: 50% gives\nabout 10.4:1, so the table is a conservative guide. In practice, the box is not the only\nvariable: the picture changes under it. Use 60% as the floor and 75% for busy or bright\nfootage. A box also makes captions readable for viewers with low vision. Outline plus drop\nshadow with no box usually fails over bright areas.\n\nThe box covers the text block plus padding. Do not stretch it to full width: it hides picture.\n",
-  "references/social-and-platforms.md": "# Social and 9:16\n\nSocial captions are read on a phone, in a hurry, often with the sound off. They keep the\ntiming and break rules, with shorter lines and bigger text.\n\n## Defaults for 9:16\n\n- Phrase chunks of 2-4 words. Single words only for a short hook.\n- A portrait line holds about 25 characters at BBC's guide (37 in a 75% 16:9 frame is about 25 in\n  a 90% portrait frame). Do not use 42.\n- Large type: 60-80 px on a 1080 x 1920 frame at minimum; check at 360 px wide.\n- Two lines at most; one usually.\n- Put a box or heavy outline behind the text (contrast rules in `sdh-and-speakers.md`).\n- Highlight the current word with colour or scale of at most about 10%; start it a frame or two\n  early. Avoid bounce on every word: it tires the eye and fights the speaker's face.\n- Keep it off the speaker's mouth and eyes, and away from important graphics.\n\n## Platform UI zones (1080 x 1920), approximate\n\nThese are the areas the apps cover with their own buttons and text. They come from ad specs\nand third-party templates, not from the platforms' documentation; apps change their UI, so\nre-check once a year.\n\n| Platform | Top | Bottom | Left | Right |\n|---|---|---|---|---|\n| YouTube Shorts | 288 | 672 | 48 | 192 |\n| Instagram Reels | 269 | 672 | 65 | 65 |\n| TikTok | 240 | 660 | 120 | 120, widening to about 300 below y 840 |\n\nSafe on all three: x 120-888, y 288-1248. Place captions inside it, in the lower part (around\ny 900-1200) so they are clear of the face and the platform's description text.\n\n`ae_captions` has `platform` safe zones for these three and a `safe` option for the combined box.\n\n## Burned-in versus sidecar\n\n- Open (burned-in) captions are the only kind that survive every platform and download; use them\n  for social.\n- Upload a sidecar too (SRT or VTT) wherever the platform accepts one: it makes the post\n  searchable, translatable and correctable, and screen readers can use it.\n- Keep the clean, caption-free master. A burned-in file can never be corrected.\n\n## Speed\n\nSocial viewers read fast, but not that fast: stay near 17-20 cps for dialogue. For hook text,\nshorter is better than faster. Do not shorten a caption's time to make a beat; extend the\nspeech or cut words.\n",
-  "references/standards.md": "# Standards\n\nPick one standard per deliverable and say which. Numbers below are from the guides linked in the\nlast column; check the live page before a contractual delivery, as platforms revise them.\n\n| Standard | Reading speed | Line length | Lines | Duration | Gap | Source |\n|---|---|---|---|---|---|---|\n| Netflix English, adult | 20 cps | 42 characters | 2 | min 5/6 s (20 frames at 24 fps), max 7 s | 2 frames minimum | [style guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977-English-USA-Timed-Text-Style-Guide) |\n| Netflix English, children's | 17 cps | 42 | 2 | same | same | same |\n| BBC | 160-180 wpm, about 0.33 s a word | 37 broadcast (Teletext-derived); online 68% of a 16:9 frame | 2 | not fixed | if left, 1 s minimum, 1.5 s better | [BBC guidelines](https://www.bbc.co.uk/accessibility/forproducts/guides/subtitles/) |\n| DCMP Captioning Key | 130-160 wpm by level | 32 | 2 | min 40 frames, max 6 s | not fixed | [DCMP text](https://dcmp.org/learn/597-captioning-key---text), [rate](https://dcmp.org/learn/601-captioning-key---presentation-rate) |\n| Ofcom (UK broadcast) | no per-cue limits | - | - | sets access-service quotas and quality expectations | - | [Ofcom](https://www.ofcom.org.uk/tv-radio-and-on-demand/information-for-industry/guidance/tv-access-services) |\n| WCAG 2.2 | no numbers | - | - | - | - | [1.2.2](https://www.w3.org/WAI/WCAG22/Understanding/captions-prerecorded.html), [1.2.4](https://www.w3.org/WAI/WCAG22/Understanding/captions-live.html), [1.4.3](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) |\n\nNotes:\n- BBC's 160-180 wpm is for live subtitles (raised from 130-150) and is the recommended speed for\n  prerecorded work too; the per-word time (0.33-0.375 s) and the 1 s gap are guidance. Report\n  them as warnings, not failures. The 37-character figure is the broadcast limit, reduced when\n  coloured text is used. Check the current page before quoting a limit to a client.\n- Netflix's timing guide also closes small gaps: where two captions are 3 to 11 frames apart at\n  24 fps, close the gap to 2 frames. Shot-change rules are in `timing-and-breaks.md`.\n- Characters per second (cps) counts every character in the caption, spaces included, divided by\n  the time on screen. Words per minute (wpm) counts words. 20 cps is roughly 200 wpm at 6 letters a\n  word, which is why Netflix is looser than the BBC.\n- DCMP's three levels (lower, middle, upper) set 130, 140 and 160 wpm.\n\n## WCAG in one paragraph\n\n1.2.2 Captions (Prerecorded), level A: synchronised captions for the audio in prerecorded video,\nexcept where the video is a clearly labelled media alternative for text. 1.2.4 Captions (Live),\nlevel AA: captions for live audio. 1.4.3 Contrast (Minimum), level AA: text at least 4.5:1 against\nits background (3:1 for large text); this applies to captions you style yourself. WCAG sets no\nreading speed. Use a broadcast or streaming standard for that.\n\n## Audio and caption sync\n\nITU-R BT.1359-1 gives the tolerances for audio against picture (as recalled from the\nRecommendation; confirm the figures before quoting them): detectable at about +45 ms when audio\nleads and -125 ms when audio lags, acceptable up to about +90 ms and -185 ms. Captions are\njudged against the speaker's lips by the same eyes, so a start within about 2 frames of speech\nonset is safe, and the 50-100 ms drift in word timestamps (`asr.md`) sits at the edge of\ndetectable. A caption that is early reads better than one that is late.\n",
-  "references/timing-and-breaks.md": '# Timing, breaks and shot changes\n\n## Order of operations\n\n1. Chunk the words into captions (by sentence, pause or word cap).\n2. Break each caption into lines.\n3. Set in and out times from the words, then apply the limits (cps, minimum, maximum).\n4. Fix gaps and shot changes last, since they move times by frames.\n\n## Chunking\n\n- Break at a sentence end, at a pause of 150 ms or more, or at the word cap, whichever comes first.\n- Subtitle-style: fill to the line limits (42 characters, 2 lines on Netflix). Phrase chunks: 2-4\n  words, set with `max_words`. Single word: only for a short hook.\n- Merge any word shorter than 8 frames into its neighbour so it does not flash.\n- Keep numbers with units, names together, and a title with its name ("Dr Patel").\n- Never time two words as one entry; per-word highlights need one entry per word.\n- Highlight a frame or two early (`highlight_lead_frames`): a highlight that lands on the word\n  looks late.\n\n## Timing\n\n- In: the speech onset, or up to 2 frames before. Never later than the first word.\n- Out: the end of speech plus a linger of about 0.5 s where space allows, but never over the\n  next caption\'s in-time minus the gap, and never past the speaker leaving the shot.\n- BBC: do not anticipate speech by more than 1.5 s or hang on for more than 1.5 s after it.\n- Minimum duration: 20 frames at 24 fps (Netflix), 40 frames (DCMP). A one-word caption still\n  gets the minimum.\n- Maximum: 7 s (Netflix), 6 s (DCMP). Split a long one at a clause boundary.\n- Reading speed: if a caption is over the limit, extend its out-time into the gap or linger\n  first, then pull its in-time earlier (by no more than about 0.5 s), then split or trim wording\n  last. Retime before rewording.\n- Frame maths at 24 fps: 1 frame = 41.7 ms, 2 frames = 83 ms, 12 frames = 0.5 s.\n\n## Gaps\n\n- Minimum gap between two captions: 2 frames (Netflix).\n- Gaps of 3-11 frames at 24 fps: close them to 2 frames, so the caption does not blink.\n- Gaps of 12 frames or more (0.5 s) are real pauses. BBC says if you leave a pause gap it should\n  be 1 s at least, better 1.5 s, since shorter gaps look jerky.\n- Never overlap two captions in time unless they carry different speakers and the format allows\n  simultaneous cues.\n\n## Shot changes\n\nCut times come from `ae_detect_cuts` (or the editor\'s edit list).\n\n| Case | Rule (Netflix) |\n|---|---|\n| In-time near a cut | on the cut frame, or at least 12 frames (0.5 s) away from it |\n| Out-time near a cut | 2 frames before the cut, or at least 0.5 s after it |\n| Caption spanning a cut | acceptable when the speech spans it; otherwise snap the out-time to 2 frames before |\n\nA caption that starts 3 frames after a cut, or ends 2 frames after one, flickers against the new\nshot. Snap to the cut or move well clear of it.\n\n## Line breaks\n\n- One line if it fits. Two lines only when needed or when the speaker switches.\n- Bottom-heavy: when both lines are used, make the lower line longer, so the top one does not\n  cover the picture more than needed. Pyramids are fine; inverted ones are not.\n- Break at the highest grammatical boundary available, in this order: after a sentence end or\n  strong punctuation; before a conjunction or relative pronoun; before a preposition phrase; between\n  subject and verb phrase only if nothing better.\n- Never end a line on: an article (a, an, the), a preposition (of, to, in, on, with), a\n  conjunction (and, but, or), an auxiliary (is, was, have, will), or a subject pronoun that\n  comes before its verb (I, he, she, we, they, you).\n- Never split a first name from its surname, a number from its unit, a phrasal verb ("give up")\n  or a hyphenated compound.\n- Do not break the caption in the middle of a quoted title or a name of a thing.\n- The planner scores candidate breaks with `breakPenalty` / `isWeakEnd`; a violation of the\n  weak-ending rule is reported, not hidden.\n- If a break cannot be made well within the character limit, re-chunk (shorter caption) before\n  breaking badly.\n'
-};
+var MCP_SKILLS = [
+  {
+    dir: "ae-extendscript",
+    name: "ae-extendscript",
+    frontmatter: { "name": "ae-extendscript", "description": "How to write ExtendScript that the chroma-ae MCP will accept and run safely in After Effects: code for ae_run_jsx and for saved skills run by ae_skill_run. Covers ES3 syntax limits (no let, const, arrow functions, template strings, class, for...of, chained ternaries; no native JSON), how the code is wrapped and what it returns, the mutates and expect parameters, undo groups, read-back after a write, stale frames from saveFrameToPng, app.executeCommand, timeouts, the safety lint (what it refuses and which tool to use instead) and when to use a dedicated tool instead. Load before calling ae_run_jsx or ae_skill_save, when a script is refused as not ES3 or by the safety lint, when ExtendScript misbehaves silently, or when asked to script After Effects, run JSX or automate something no dedicated tool covers.", "metadata": { "version": "1.0.0" } },
+    files: [
+      { "path": "SKILL.md", "sha256": "aebae1bfde5f1f37e7bf3b1174f4700097141e153e5fae3e7be35e1d4eb2265e", "size": 14756 }
+    ]
+  },
+  {
+    dir: "ae-fonts",
+    name: "ae-fonts",
+    frontmatter: { "name": "ae-fonts", "description": "Find, check and replace fonts in After Effects with the chroma-ae MCP (ae_fonts), and deal with the font warnings. Load for: missing font, font substitution, substituted font, replace font, swap a font project-wide, which fonts does this project use, is this font installed, does the font have the glyphs (Turkish, Cyrillic, Arabic), Unknown BIB Error, cannot access font, ATM Parse Error, CoolType, Adobe Fonts not syncing, duplicate or damaged fonts, a popup that blocks scripts after a font change, ae_busy with a font popup.", "metadata": { "version": "1.0.0" } },
+    files: [
+      { "path": "SKILL.md", "sha256": "624219ad89a31ec7cc408038341e53abc6895414c6dc753315c620908197af7d", "size": 14247 }
+    ]
+  },
+  {
+    dir: "ae-live-session",
+    name: "ae-live-session",
+    frontmatter: { "name": "ae-live-session", "description": "How to work in After Effects through the chroma-ae MCP while a person is editing the same project live: inspect before writing, target guards (expect), checkpoints and undo, write outcomes (applied, no_op, not_applied, unknown) and the quarantine, idempotency keys, the single-writer queue and busy or Stop refusals, popups and the dialog rules (ae_dialogs, ae_dialog_respond), asking the user (ae_plan, ae_ask_user), long renders (render queue, aerender, render lock, the AE 26.3 render hang), and saving. Load at the start of any session that changes an open After Effects project, after a timeout, busy, queued, guard or Stop refusal, when a popup appears, before starting a render or saving, or when the user says they are working in After Effects at the same time.", "metadata": { "version": "1.0.0" } },
+    files: [
+      { "path": "SKILL.md", "sha256": "111554bf9fd1329e53340672409cbbb5281e0e8c563b6f62e42e7d8f8c8f17f2", "size": 17567 }
+    ]
+  },
+  {
+    dir: "captions",
+    name: "captions",
+    frontmatter: { "name": "captions", "description": "Make, check and ship captions and subtitles that meet a published standard: transcribe, chunk, time, break lines, style, QA and export. Use for captions, subtitles, SDH, closed captions, open captions, burn-in, SRT, VTT, WebVTT, TTML, IMSC, SCC, karaoke captions, word highlight, kinetic captions, social captions, TikTok / Reels / Shorts captions, transcript, transcribe, Whisper, ElevenLabs Scribe, reading speed, cps, line breaks, caption QA, safe zone, Netflix / BBC / DCMP / Ofcom standards, accessibility and WCAG, in After Effects (chroma-ae MCP), Premiere, Remotion, HyperFrames or any other tool. Trigger phrases: 'add captions', 'subtitle this', 'caption this reel', 'burn in subtitles', 'make an SRT', 'check these captions', 'too fast to read', 'TikTok captions', 'word by word captions', 'accessible captions'.", "metadata": { "version": "1.0.0", "sources": "see NOTICE.md" } },
+    files: [
+      { "path": "SKILL.md", "sha256": "d3db0ca1df66a487a05978d097e9fc3e4bf0c32f2563c2ac895462fb39a03de1", "size": 7006 },
+      { "path": "NOTICE.md", "sha256": "d37b435f5f2d78372baf54a099f5af93d357f30037f85a65865d3dca8f3aedee", "size": 3490 },
+      { "path": "references/asr.md", "sha256": "be3777d019a86588d719c44200f7805fa3d4ede911a7e8eb9a0e288bc9292f44", "size": 2015 },
+      { "path": "references/chroma-ae-workflow.md", "sha256": "1506bf52ec0610e0ceb70718a641b5ebfd5c8e4d5dec0048c5da77ab70e0554f", "size": 5115 },
+      { "path": "references/formats.md", "sha256": "7f0c627038269ff8a3b9df895c7e60322057dafd88068463cb57b18c390ac892", "size": 2295 },
+      { "path": "references/sdh-and-speakers.md", "sha256": "20efbb630c6117604501c100703a8213173746d31845aafca8258aebfc1f755f", "size": 2946 },
+      { "path": "references/social-and-platforms.md", "sha256": "71e7e3b0a3922a4ac2193b79149612a8e286f8e71220a8cb170a89a0285aa0e9", "size": 2205 },
+      { "path": "references/standards.md", "sha256": "79870cea3ccc06bd26fb812c1f9e33d43332be18c7e62c647a4812eb9ed48f48", "size": 3497 },
+      { "path": "references/timing-and-breaks.md", "sha256": "15781bb6e23dd8708eb877916c5071a87a84154ebffffb530150483120719d86", "size": 3986 }
+    ]
+  },
+  {
+    dir: "motion-director",
+    name: "chroma-motion-director",
+    frontmatter: { "name": "chroma-motion-director", "description": `Direct and build motion pieces end to end: brief, numeric spec, still frames, choreography, sound, review and delivery, with measured timing, easing, stagger, transition, type, caption and audio rules. Use for any motion graphics, launch or promo film, social reel, explainer, title sequence, logo sting, lower third, stat or chart animation, kinetic type, or motion review, whether it is built in After Effects (through the chroma-ae MCP), Remotion, HyperFrames, Lottie or code. Also use to critique motion ("it feels robotic / cheap / like slides / too fast") and to turn adjectives into numbers. Trigger phrases: 'motion', 'animate', 'animation', 'promo', 'launch video', 'reel', 'sting', 'lower third', 'kinetic type', 'title sequence', 'explainer', 'easing', 'stagger', 'transition', 'make it feel premium', 'review this animation'.`, "metadata": { "version": "1.0.0", "sources": "see NOTICE.md" } },
+    files: [
+      { "path": "SKILL.md", "sha256": "1350b528e38f503d81a46687113bbe8c4013ba6c7df15a1d98dcf593cd59313a", "size": 9400 },
+      { "path": "NOTICE.md", "sha256": "0dcba5d2a8a4318151015e5ce9aee92f7a4da46e18e09247f62a4abd7c082e81", "size": 2779 },
+      { "path": "references/choreography.md", "sha256": "af3fab44a27a11a133ba9d6bf7f88269b5f56d39104b73608dda83253b051d2e", "size": 7213 },
+      { "path": "references/review.md", "sha256": "2ea84a9ff5b03f0b315d9f2b7c52ed6ac8a01be846cdd926707c87e1c22a45e0", "size": 5877 },
+      { "path": "references/sound-and-captions.md", "sha256": "69a748ef606167bceedbf76372ceca64a8e4ece1709470922b3d3f0ea2dd9417", "size": 3642 },
+      { "path": "references/spec.md", "sha256": "e0fea1e6b86526f785210eec2400df84cccead58b81b61cabe6fce828fc285be", "size": 2473 },
+      { "path": "references/story-and-pacing.md", "sha256": "d66c0b050c502e18a615548d8cfb341b46b8b7bbc8b9c8d841a723ddbc331ee6", "size": 5149 },
+      { "path": "references/timing-and-easing.md", "sha256": "11098eb667c639636d94c78d4dbd4affffd3c58db6def2e199aad4a2cc0f98e2", "size": 7020 },
+      { "path": "references/type-and-layout.md", "sha256": "2c6154fd70627778070d36ca2a9149499b1a0b44b639cdb647ee73ac7beb156e", "size": 5221 }
+    ]
+  }
+];
+var GUIDANCE_FILES = SKILL_TEXT["motion-director"];
+var CAPTIONS_GUIDANCE_FILES = SKILL_TEXT["captions"];
 
 // src/guidance/index.ts
 var GUIDANCE_URI_PREFIX = "chroma-ae://guidance/motion-director/";
@@ -74335,6 +74564,10 @@ var CAPTIONS_DESCRIPTIONS = {
   "references/social-and-platforms.md": "Social captions and 9:16 layout: chunk size, type size and safe zones.",
   "references/standards.md": "Caption standards compared: Netflix, BBC, DCMP, Ofcom and WCAG numbers.",
   "references/timing-and-breaks.md": "Timing, line breaks and shot-change rules, in order of operations."
+};
+var GUIDANCE_DESCRIPTIONS_BY_DIR = {
+  "motion-director": DESCRIPTIONS,
+  captions: CAPTIONS_DESCRIPTIONS
 };
 function titleOf(rel, text) {
   const m = /^#\s+(.+)$/m.exec(text);
@@ -74369,6 +74602,79 @@ function captionsSkillBody() {
 }
 function reviewBody() {
   return GUIDANCE_FILES["references/review.md"];
+}
+
+// src/guidance/mcp-skills.ts
+var SKILL_URI_SCHEME = "skill://";
+var index;
+function build() {
+  const entries2 = [];
+  const byUri = /* @__PURE__ */ new Map();
+  const files = /* @__PURE__ */ new Map();
+  const listing = [];
+  try {
+    const skills = [...MCP_SKILLS].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const s of skills) {
+      const root = `${SKILL_URI_SCHEME}${s.name}/`;
+      const texts = SKILL_TEXT[s.dir] ?? {};
+      const resources = [];
+      for (const f of s.files) {
+        const uri = root + f.path;
+        resources.push({ uri, digest: `sha256:${f.sha256}`, size: f.size });
+        const mimeType = f.path.endsWith(".md") ? "text/markdown" : "text/plain";
+        const text = texts[f.path] ?? "";
+        files.set(uri, { mimeType, text });
+        if (f.path === "SKILL.md") {
+          listing.push({ uri, name: String(s.frontmatter.name), description: String(s.frontmatter.description), mimeType, size: f.size });
+        } else {
+          const heading = /^# +(.+?)\s*$/m.exec(text);
+          const description = GUIDANCE_DESCRIPTIONS_BY_DIR[s.dir]?.[f.path];
+          listing.push({
+            uri,
+            name: f.path,
+            ...heading ? { title: heading[1] } : {},
+            ...description ? { description } : {},
+            mimeType,
+            size: f.size
+          });
+        }
+      }
+      const entry = {
+        uri: `${root}SKILL.md`,
+        frontmatter: JSON.parse(JSON.stringify(s.frontmatter)),
+        resources
+      };
+      entries2.push(entry);
+      byUri.set(entry.uri, entry);
+    }
+  } catch {
+  }
+  return { entries: entries2, byUri, files, listing };
+}
+function idx() {
+  if (!index) index = build();
+  return index;
+}
+function copyEntry(e) {
+  return {
+    uri: e.uri,
+    frontmatter: JSON.parse(JSON.stringify(e.frontmatter)),
+    resources: e.resources.map((r) => ({ uri: r.uri, digest: r.digest, size: r.size }))
+  };
+}
+function listMcpSkills() {
+  return idx().entries.map(copyEntry);
+}
+function getMcpSkill(uri) {
+  const e = idx().byUri.get(uri);
+  return e ? copyEntry(e) : void 0;
+}
+function readMcpSkillFile(uri) {
+  const f = idx().files.get(uri);
+  return f ? { uri, mimeType: f.mimeType, text: f.text } : void 0;
+}
+function listMcpSkillResources() {
+  return idx().listing.map((r) => ({ ...r }));
 }
 
 // src/mcp-rpc.ts
@@ -74407,11 +74713,7 @@ function listTools(toolset) {
   }
   return listedTools().map(fullListEntry);
 }
-var SUPPORTED_PROTOCOL_VERSIONS = [
-  "2025-06-18",
-  "2025-03-26",
-  "2024-11-05"
-];
+var SUPPORTED_PROTOCOL_VERSIONS = LEGACY_PROTOCOL_VERSIONS;
 var DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 var SERVER_NAME = "chroma-ae-mcp";
 var SERVER_VERSION = "0.7.5";
@@ -74426,11 +74728,141 @@ function makeErrorResponse(id, code, message, data) {
     error
   };
 }
-function isPlainObject2(val) {
+function isPlainObject3(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
-async function handleSingleRpc(message, ctx, toolset, client, notify, elicitation) {
-  if (!isPlainObject2(message)) {
+function respond(id, outcome) {
+  if ("result" in outcome) return { jsonrpc: "2.0", id, result: outcome.result };
+  return makeErrorResponse(id, outcome.code, outcome.message, outcome.data);
+}
+function promptsListPayload() {
+  return { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) };
+}
+function promptsGet(params) {
+  const name = params.name;
+  const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : void 0;
+  if (!prompt) {
+    return { code: -32602, message: `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}` };
+  }
+  const rawArgs = params.arguments;
+  if (rawArgs !== void 0 && !isPlainObject3(rawArgs)) {
+    return { code: -32602, message: "Invalid params: `arguments` must be an object" };
+  }
+  const arg = rawArgs?.[prompt.arguments[0].name];
+  if (arg !== void 0 && typeof arg !== "string") {
+    return { code: -32602, message: `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string` };
+  }
+  return {
+    result: {
+      description: prompt.description,
+      messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }]
+    }
+  };
+}
+function guidanceResourcesPayload() {
+  return {
+    resources: listGuidanceResources().map((r) => ({
+      uri: r.uri,
+      name: r.name,
+      description: r.description,
+      mimeType: r.mimeType
+    }))
+  };
+}
+async function toolsCall(id, params, ctx, toolset, client, notify, elicitation, onCallStart) {
+  const toolName = params.name;
+  if (typeof toolName !== "string" || toolName.length === 0) {
+    return { code: -32602, message: "Invalid params: tools/call requires a string `name`" };
+  }
+  const rawArgs = params.arguments;
+  if (rawArgs !== void 0 && !isPlainObject3(rawArgs)) {
+    return { code: -32602, message: "Invalid params: `arguments` must be an object" };
+  }
+  const meta = isPlainObject3(params._meta) ? params._meta : {};
+  const token = meta.progressToken;
+  const state = {
+    requestId: id ?? "",
+    client: client ?? "",
+    cancelled: false,
+    progress: 0,
+    ...typeof token === "string" || typeof token === "number" ? { progressToken: token } : {},
+    ...notify ? { notify } : {},
+    ...notify && elicitation ? { request: (m, p, ms) => requestFromClient(notify, m, p, ms) } : {}
+  };
+  onCallStart?.((reason) => {
+    state.cancelled = true;
+    state.reason = reason.slice(0, 200);
+  });
+  const result = await runInCall(
+    state,
+    () => isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
+  );
+  return { result };
+}
+var SERVER_INFO = { name: SERVER_NAME, version: SERVER_VERSION };
+async function handleModern(id, method, params, info, ctx, toolset, client, notify, onCallStart) {
+  const done = (payload) => ({ jsonrpc: "2.0", id, result: decorateResult(payload, SERVER_INFO) });
+  const settle = (outcome) => "result" in outcome ? done(outcome.result) : respond(id, outcome);
+  const label2 = client ?? (clientLabelOf(info) || void 0);
+  switch (method) {
+    case "server/discover":
+      return done(
+        cacheable(
+          {
+            supportedVersions: ALL_PROTOCOL_VERSIONS,
+            capabilities: {
+              tools: { listChanged: false },
+              prompts: { listChanged: false },
+              resources: { subscribe: false, listChanged: false },
+              extensions: { "io.modelcontextprotocol/skills": {} }
+            },
+            ...toolset === "core" ? { instructions: coreInstructions() } : {}
+          },
+          "private"
+        )
+      );
+    case "tools/list":
+      return done(cacheable({ tools: listTools(toolset) }, "private"));
+    case "tools/call":
+      return settle(await toolsCall(id, params, ctx, toolset, label2, notify, false, onCallStart));
+    case "prompts/list":
+      return done(cacheable(promptsListPayload(), "public"));
+    case "prompts/get":
+      return settle(promptsGet(params));
+    case "resources/list":
+      return done(cacheable({ resources: listMcpSkillResources() }, "public"));
+    case "resources/templates/list":
+      return done(cacheable({ resourceTemplates: [] }, "public"));
+    case "resources/read": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        return respond(id, { code: -32602, message: "Invalid params: `uri` must be a string" });
+      }
+      const file = uri.startsWith(SKILL_URI_SCHEME) ? readMcpSkillFile(uri) : readGuidance(uri);
+      if (!file) {
+        return respond(id, { code: -32602, message: `Resource not found: ${JSON.stringify(uri)}`, data: { uri } });
+      }
+      return done(cacheable({ contents: [{ uri: file.uri, mimeType: file.mimeType, text: file.text }] }, "public"));
+    }
+    case "skills/list":
+      return done(cacheable({ skills: listMcpSkills() }, "public"));
+    case "skills/get": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        return respond(id, { code: -32602, message: "Invalid params: `uri` must be a string" });
+      }
+      const skill = getMcpSkill(uri);
+      if (!skill) {
+        return respond(id, { code: -32602, message: `No skill is served at ${uri}`, data: { uri } });
+      }
+      return done(cacheable({ skill }, "public"));
+    }
+    default:
+      return makeErrorResponse(id, -32601, `Method not found: ${method}`);
+  }
+}
+async function handleSingleRpc(message, ctx, toolset, client, notify, elicitation, onCallStart, batched = false) {
+  if (!isPlainObject3(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
   const hasId = "id" in message && message.id !== void 0;
@@ -74445,13 +74877,13 @@ async function handleSingleRpc(message, ctx, toolset, client, notify, elicitatio
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
   if (!hasId) {
-    if (method === "notifications/cancelled" && isPlainObject2(message.params)) {
+    if (method === "notifications/cancelled" && isPlainObject3(message.params)) {
       cancelCall(client ?? "", message.params.requestId, message.params.reason);
     }
     return null;
   }
   const rawParams = message.params;
-  if (rawParams !== void 0 && !isPlainObject2(rawParams)) {
+  if (rawParams !== void 0 && !isPlainObject3(rawParams)) {
     return makeErrorResponse(
       id,
       -32602,
@@ -74459,6 +74891,14 @@ async function handleSingleRpc(message, ctx, toolset, client, notify, elicitatio
     );
   }
   const params = rawParams ?? {};
+  const era = classifyRequest(message);
+  if (era.era === "error") return era.response;
+  if (era.era === "modern") {
+    if (batched) {
+      return makeErrorResponse(id, -32600, `Invalid Request: a ${era.version} request cannot be sent in a JSON-RPC batch; send it on its own`);
+    }
+    return handleModern(id, method, params, era, ctx, toolset, client, notify, onCallStart);
+  }
   switch (method) {
     case "initialize": {
       const clientVersion = typeof params.protocolVersion === "string" ? params.protocolVersion : void 0;
@@ -74509,78 +74949,16 @@ async function handleSingleRpc(message, ctx, toolset, client, notify, elicitatio
       };
     }
     case "tools/call": {
-      const toolName = params.name;
-      if (typeof toolName !== "string" || toolName.length === 0) {
-        return makeErrorResponse(
-          id,
-          -32602,
-          "Invalid params: tools/call requires a string `name`"
-        );
-      }
-      const rawArgs = params.arguments;
-      if (rawArgs !== void 0 && !isPlainObject2(rawArgs)) {
-        return makeErrorResponse(
-          id,
-          -32602,
-          "Invalid params: `arguments` must be an object"
-        );
-      }
-      const meta = isPlainObject2(params._meta) ? params._meta : {};
-      const token = meta.progressToken;
-      const state = {
-        requestId: id ?? "",
-        client: client ?? "",
-        cancelled: false,
-        progress: 0,
-        ...typeof token === "string" || typeof token === "number" ? { progressToken: token } : {},
-        ...notify ? { notify } : {},
-        ...notify && elicitation ? { request: (m, p, ms) => requestFromClient(notify, m, p, ms) } : {}
-      };
-      const result = await runInCall(
-        state,
-        () => isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
-      );
-      return { jsonrpc: "2.0", id, result };
+      return respond(id, await toolsCall(id, params, ctx, toolset, client, notify, elicitation));
     }
     case "prompts/list": {
-      return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) } };
+      return { jsonrpc: "2.0", id, result: promptsListPayload() };
     }
     case "prompts/get": {
-      const name = params.name;
-      const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : void 0;
-      if (!prompt) {
-        return makeErrorResponse(id, -32602, `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}`);
-      }
-      const rawArgs = params.arguments;
-      if (rawArgs !== void 0 && !isPlainObject2(rawArgs)) {
-        return makeErrorResponse(id, -32602, "Invalid params: `arguments` must be an object");
-      }
-      const arg = rawArgs?.[prompt.arguments[0].name];
-      if (arg !== void 0 && typeof arg !== "string") {
-        return makeErrorResponse(id, -32602, `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string`);
-      }
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          description: prompt.description,
-          messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }]
-        }
-      };
+      return respond(id, promptsGet(params));
     }
     case "resources/list": {
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          resources: listGuidanceResources().map((r) => ({
-            uri: r.uri,
-            name: r.name,
-            description: r.description,
-            mimeType: r.mimeType
-          }))
-        }
-      };
+      return { jsonrpc: "2.0", id, result: guidanceResourcesPayload() };
     }
     case "resources/read": {
       const uri = params.uri;
@@ -74619,14 +74997,14 @@ async function handleRpc(message, ctx, opts = {}) {
     }
     const results = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation, void 0, true);
       if (res !== null) {
         results.push(res);
       }
     }
     return results.length > 0 ? results : null;
   }
-  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation, opts.onCallStart);
 }
 
 // src/panel-host.ts
@@ -75042,39 +75420,96 @@ function createPanelMcp(opts) {
       );
       return;
     }
-    const headerValue = req.headers?.[TOOLSET_HEADER];
-    const choice = parseToolset(headerValue);
+    const headerValue2 = req.headers?.[TOOLSET_HEADER];
+    const choice = parseToolset(headerValue2);
     if (choice.invalid) {
-      const shown = String(Array.isArray(headerValue) ? headerValue[0] : headerValue).slice(0, 40);
+      const shown = String(Array.isArray(headerValue2) ? headerValue2[0] : headerValue2).slice(0, 40);
       if (!warnedToolsets.has(shown)) {
         warnedToolsets.add(shown);
         log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the core tool list`);
       }
     }
+    const single = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : null;
+    if (Array.isArray(parsed) && parsed.some((item) => classifyRequest(item).era === "modern")) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request: a 2026-07-28 request must be the only message in its POST body, not part of a JSON-RPC batch" } })
+      );
+      return;
+    }
+    const versionMismatch = single && single.id !== void 0 ? bodyVersionHeaderMismatch(req.headers, single) : null;
+    if (versionMismatch !== null) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: idOf(single), error: { code: ERR_HEADER_MISMATCH, message: versionMismatch } })
+      );
+      return;
+    }
+    const era = classifyRequest(single);
+    if (era.era === "error") {
+      sendResponse(res, era.httpStatus, { "Content-Type": "application/json" }, JSON.stringify(era.response));
+      return;
+    }
+    const isRequest = !!single && typeof single.method === "string" && single.method.length > 0 && single.id !== void 0;
+    let headerProblem = null;
+    if (era.era === "modern" && single) {
+      const check = validateModernHeaders(req.headers, { method: String(single.method), params: single.params }, era.version);
+      if (!check.ok) headerProblem = check.message;
+    } else if (isRequest) {
+      headerProblem = legacyBodyWithModernHeader(req.headers);
+    }
+    if (headerProblem !== null) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: idOf(single), error: { code: ERR_HEADER_MISMATCH, message: headerProblem } })
+      );
+      return;
+    }
+    const modern = era.era === "modern";
     const clientHeader = req.headers?.[CLIENT_HEADER];
-    const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "").replace(/[^ -~]+/g, " ").trim().slice(0, 40);
+    const client = sanitizeClientLabel(String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "")) || (era.era === "modern" ? clientLabelOf(era) : "");
     const accept = String(req.headers?.accept ?? "");
     const p = parsed;
     const isCall = !!p && !Array.isArray(parsed) && p.method === "tools/call";
     const token = isCall ? p.params?._meta?.progressToken : void 0;
     const elicitHeader = req.headers?.["x-chroma-elicitation"];
-    const elicitation = isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    const elicitation = !modern && isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    let cancelThisCall = null;
+    let closedEarly = false;
+    const onCallStart = modern && isCall ? (cancel) => {
+      cancelThisCall = cancel;
+      if (closedEarly) cancel("the client closed the connection");
+    } : void 0;
+    if (onCallStart && typeof res.on === "function") {
+      res.on("close", () => {
+        if (res.writableEnded) return;
+        closedEarly = true;
+        if (cancelThisCall) cancelThisCall("the client closed the connection");
+      });
+    }
     if ((typeof token === "string" || typeof token === "number" || elicitation) && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
+      if (modern) res.setHeader("X-Accel-Buffering", "no");
       const event = (msg) => {
         if (!res.writableEnded) res.write?.(`event: message
 data: ${JSON.stringify(msg)}
 
 `);
       };
-      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, notify: event, elicitation });
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, notify: event, elicitation, ...onCallStart ? { onCallStart } : {} });
       if (streamed) event(streamed);
       if (!res.writableEnded) res.end();
       return;
     }
-    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0 });
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, ...onCallStart ? { onCallStart } : {} });
     if (rpcResponse === null || Array.isArray(rpcResponse) && rpcResponse.length === 0) {
       if (!res.writableEnded) {
         res.statusCode = 202;
@@ -75082,9 +75517,10 @@ data: ${JSON.stringify(msg)}
       }
       return;
     }
+    const notFound = modern && !Array.isArray(rpcResponse) && "error" in rpcResponse && rpcResponse.error.code === -32601;
     sendResponse(
       res,
-      200,
+      notFound ? 404 : 200,
       { "Content-Type": "application/json" },
       JSON.stringify(rpcResponse)
     );

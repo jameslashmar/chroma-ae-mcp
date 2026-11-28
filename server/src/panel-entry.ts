@@ -4,6 +4,16 @@ import { AssetWatcher } from "./tools/ext/assets.js";
 import { writeDiagnostics } from "./tools/ext/diagnostics.js";
 import { describeBlockingDialogs, listDialogsForWatcher, markShown, respondToDialog, startDialogWatch } from "./tools/ext/dialogs.js";
 import { clientRequestChannel } from "./call-context.js";
+import {
+  classifyRequest,
+  clientLabelOf,
+  bodyVersionHeaderMismatch,
+  ERR_HEADER_MISMATCH,
+  idOf,
+  legacyBodyWithModernHeader,
+  sanitizeClientLabel,
+  validateModernHeaders,
+} from "./mcp-modern.js";
 import { PopupCenter } from "./popups.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
@@ -51,6 +61,8 @@ export interface HttpResponseLike {
   /** For the event-stream reply (progress notifications). */
   write?: (chunk: string) => unknown;
   end: (body?: string) => void;
+  /** 'close' fires when the connection ends; a modern client cancels a tools/call by closing it. */
+  on?: (event: string, listener: (...args: any[]) => void) => unknown;
 }
 
 function sendResponse(
@@ -259,11 +271,60 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
         log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the core tool list`);
       }
     }
+    // Which MCP revision a single request speaks (mcp-modern.ts). A malformed modern request, or a
+    // modern-only method without its _meta, is answered here with a 400; the legacy path is untouched.
+    const single = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    // A 2026-07-28 POST body is a single message ("Sending Messages"): a batch holding a 2026-07-28 request would
+    // skip every header rule, so the whole POST is refused. Legacy batches are served as before.
+    if (Array.isArray(parsed) && parsed.some((item) => classifyRequest(item).era === "modern")) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request: a 2026-07-28 request must be the only message in its POST body, not part of a JSON-RPC batch" } })
+      );
+      return;
+    }
+    // "Protocol Version Header": the header must equal the body's _meta version, whatever that value is; this is
+    // checked before the version itself is judged (so an unknown body version with a mismatching header is -32020).
+    const versionMismatch = single && single.id !== undefined ? bodyVersionHeaderMismatch(req.headers, single) : null;
+    if (versionMismatch !== null) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: idOf(single as Record<string, unknown>), error: { code: ERR_HEADER_MISMATCH, message: versionMismatch } })
+      );
+      return;
+    }
+    const era = classifyRequest(single);
+    if (era.era === "error") {
+      sendResponse(res, era.httpStatus, { "Content-Type": "application/json" }, JSON.stringify(era.response));
+      return;
+    }
+    const isRequest = !!single && typeof single.method === "string" && single.method.length > 0 && single.id !== undefined;
+    let headerProblem: string | null = null;
+    if (era.era === "modern" && single) {
+      const check = validateModernHeaders(req.headers, { method: String(single.method), params: single.params }, era.version);
+      if (!check.ok) headerProblem = check.message;
+    } else if (isRequest) {
+      headerProblem = legacyBodyWithModernHeader(req.headers);
+    }
+    if (headerProblem !== null) {
+      sendResponse(
+        res,
+        400,
+        { "Content-Type": "application/json" },
+        JSON.stringify({ jsonrpc: "2.0", id: idOf(single as Record<string, unknown>), error: { code: ERR_HEADER_MISMATCH, message: headerProblem } })
+      );
+      return;
+    }
+    const modern = era.era === "modern";
+
     const clientHeader = req.headers?.[CLIENT_HEADER];
-    const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "")
-      .replace(/[^ -~]+/g, " ")
-      .trim()
-      .slice(0, 40);
+    // The header wins; a modern request without it is labelled by its _meta clientInfo.name.
+    const client =
+      sanitizeClientLabel(String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "")) || (era.era === "modern" ? clientLabelOf(era) : "");
     // A tools/call that asks for progress (_meta.progressToken) from a client that takes an event stream is
     // answered as one: a notifications/progress event per After Effects eval, then the result. Everything
     // else stays a single JSON reply.
@@ -272,21 +333,43 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     const isCall = !!p && !Array.isArray(parsed) && p.method === "tools/call";
     const token = isCall ? p.params?._meta?.progressToken : undefined;
     // The relay says the client handles elicitation/create; a call can then ask it questions on its stream.
+    // Revision 2026-07-28 has no server-to-client requests, so the header is ignored for it.
     const elicitHeader = req.headers?.["x-chroma-elicitation"];
-    const elicitation = isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    const elicitation = !modern && isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    // Streamable HTTP "Cancellation": a modern client cancels a call by closing the connection. The hook cancels
+    // exactly this call (not whichever call shares its client label and id). The call is only marked; it stops at
+    // its next safe point (an eval already sent to After Effects is never abandoned).
+    let cancelThisCall: ((reason: string) => void) | null = null;
+    let closedEarly = false;
+    const onCallStart =
+      modern && isCall
+        ? (cancel: (reason: string) => void) => {
+            cancelThisCall = cancel;
+            if (closedEarly) cancel("the client closed the connection");
+          }
+        : undefined;
+    if (onCallStart && typeof res.on === "function") {
+      res.on("close", () => {
+        if (res.writableEnded) return;
+        closedEarly = true;
+        if (cancelThisCall) cancelThisCall("the client closed the connection");
+      });
+    }
     if ((typeof token === "string" || typeof token === "number" || elicitation) && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
+      // 2026-07-28 streamable HTTP: SHOULD, so proxies do not hold the progress events back.
+      if (modern) res.setHeader("X-Accel-Buffering", "no");
       const event = (msg: unknown) => {
         if (!res.writableEnded) res.write?.(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
       };
-      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, notify: event, elicitation });
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, notify: event, elicitation, ...(onCallStart ? { onCallStart } : {}) });
       if (streamed) event(streamed);
       if (!res.writableEnded) res.end();
       return;
     }
-    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined });
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, ...(onCallStart ? { onCallStart } : {}) });
 
     if (
       rpcResponse === null ||
@@ -299,9 +382,12 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       return;
     }
 
+    // A modern request for a method this revision lacks (initialize, ping, ...) is a 404; every other answer,
+    // errors included, is a 200 so a dual-era client never mistakes it for a legacy server.
+    const notFound = modern && !Array.isArray(rpcResponse) && "error" in rpcResponse && rpcResponse.error.code === -32601;
     sendResponse(
       res,
-      200,
+      notFound ? 404 : 200,
       { "Content-Type": "application/json" },
       JSON.stringify(rpcResponse)
     );

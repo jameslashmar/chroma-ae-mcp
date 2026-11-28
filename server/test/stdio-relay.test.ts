@@ -45,6 +45,7 @@ interface Seen {
   toolset: string | undefined;
   client: string | undefined;
   body: any;
+  headers: http.IncomingHttpHeaders;
 }
 
 /** A stand-in for the panel's /mcp endpoint. */
@@ -55,7 +56,7 @@ async function fakePanel(reply: (body: any) => { status: number; body?: unknown 
     req.on("data", (c) => (text += c));
     req.on("end", () => {
       const body = JSON.parse(text);
-      seen.push({ auth: req.headers.authorization, toolset: req.headers["x-chroma-toolset"] as string | undefined, client: req.headers["x-chroma-client"] as string | undefined, body });
+      seen.push({ auth: req.headers.authorization, toolset: req.headers["x-chroma-toolset"] as string | undefined, client: req.headers["x-chroma-client"] as string | undefined, body, headers: req.headers });
       const out = reply(body);
       res.statusCode = out.status;
       if (out.body === undefined) {
@@ -748,5 +749,463 @@ describe("panel/tools/stdio-relay.cjs: elicitation", { timeout: 20000 }, () => {
     expect(answer).toMatchObject({ id: "chroma-srv-1", result: { action: "accept" } });
     expect(JSON.parse(out.find((m) => m.id === 2).result.content[0].text)).toEqual({ got: "accept" });
     expect(out.some((m) => m.id === "chroma-srv-1" && m.error)).toBe(false); // nothing answered back for the client's own reply
+  });
+});
+
+// ---------- MCP 2026-07-28 and the Skills extension ----------
+
+const PV = "io.modelcontextprotocol/protocolVersion";
+const CAPS = "io.modelcontextprotocol/clientCapabilities";
+const CINFO = "io.modelcontextprotocol/clientInfo";
+const SINFO = "io.modelcontextprotocol/serverInfo";
+const ALL_VERSIONS = ["2026-07-28", "2025-06-18", "2025-03-26", "2024-11-05"];
+
+/** The _meta of a modern request. */
+const mmeta = (extra: Record<string, unknown> = {}) => ({ [PV]: "2026-07-28", [CAPS]: {}, [CINFO]: { name: "modern-client", version: "1" }, ...extra });
+const modern = (id: number, method: string, params: Record<string, unknown> = {}, meta: Record<string, unknown> = mmeta()) => ({
+  jsonrpc: "2.0",
+  id,
+  method,
+  params: { ...params, _meta: meta },
+});
+const ok = (body: any, result: unknown) => ({ status: 200, body: { jsonrpc: "2.0", id: body.id, result } });
+/** The decoded Mcp-Name: the Base64 sentinel form (=?base64?...?=) is decoded as the panel does. */
+const decodeSentinel = (v: string | undefined) => {
+  const m = /^=\?base64\?(.*)\?=$/.exec(v ?? "");
+  return m ? Buffer.from(m[1], "base64").toString("utf8") : v;
+};
+
+const SKILL_URI = "skill://captions/SKILL.md";
+const SKILL_REF = "skill://captions/references/rules.md";
+const SKILLS = [
+  {
+    uri: SKILL_URI,
+    frontmatter: { name: "captions", description: "Make captions." },
+    resources: [
+      { uri: SKILL_URI, digest: "sha256:" + "a".repeat(64), size: 10 },
+      { uri: SKILL_REF, digest: "sha256:" + "b".repeat(64), size: 20 },
+    ],
+  },
+];
+const SKILL_TEXT: Record<string, string> = { [SKILL_URI]: "# Captions\n", [SKILL_REF]: "# Rules\n" };
+const skillContents = (uri: string) => [{ uri, mimeType: "text/markdown", text: SKILL_TEXT[uri] }];
+
+describe("panel/tools/stdio-relay.cjs: MCP 2026-07-28", { timeout: 20000 }, () => {
+  it("sends MCP-Protocol-Version, Mcp-Method and Mcp-Name for the requests that name something", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    await runRelay(dir, panel.port, [
+      modern(1, "server/discover"),
+      modern(2, "tools/call", { name: "ae_status", arguments: {} }),
+      modern(3, "prompts/get", { name: "motion_director" }),
+      modern(4, "resources/read", { uri: "chroma-ae://guidance/motion-director/SKILL.md" }),
+      modern(5, "tools/list"),
+    ]);
+    const by = (m: string) => panel.seen.find((s) => s.body.method === m)!;
+    for (const s of panel.seen) {
+      expect(s.headers["mcp-protocol-version"]).toBe("2026-07-28");
+      expect(s.headers["mcp-method"]).toBe(s.body.method);
+      expect(s.headers["x-chroma-elicitation"]).toBeUndefined();
+      expect(s.headers["x-chroma-toolset"]).toBe("core");
+    }
+    expect(by("server/discover").headers["mcp-name"]).toBeUndefined();
+    expect(by("tools/list").headers["mcp-name"]).toBeUndefined();
+    expect(by("tools/call").headers["mcp-name"]).toBe("ae_status");
+    expect(by("prompts/get").headers["mcp-name"]).toBe("motion_director");
+    expect(by("resources/read").headers["mcp-name"]).toBe("chroma-ae://guidance/motion-director/SKILL.md");
+  });
+
+  it("encodes a Mcp-Name that is not plain printable ASCII as =?base64?...?=, and one that looks like the sentinel", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    const names = ["café テスト", " padded ", "=?base64?abc?=", "plain_name"];
+    await runRelay(dir, panel.port, names.map((name, i) => modern(i + 1, "tools/call", { name, arguments: {} })));
+    const sent = new Map(panel.seen.map((s) => [s.body.params.name as string, s.headers["mcp-name"] as string]));
+    expect(sent.get("plain_name")).toBe("plain_name");
+    for (const name of names.slice(0, 3)) {
+      const header = sent.get(name)!;
+      expect(header, name).toMatch(/^=\?base64\?[A-Za-z0-9+/=]+\?=$/);
+      expect(decodeSentinel(header)).toBe(name);
+    }
+    // A resource URI with non-ASCII characters is encoded the same way.
+    const uri = "skill://café/SKILL.md";
+    const p2 = await fakePanel((body) => ok(body, { contents: [] }));
+    await runRelay(dir, p2.port, [modern(1, "resources/read", { uri })]);
+    expect(decodeSentinel(p2.seen[0].headers["mcp-name"] as string)).toBe(uri);
+  });
+
+  it("never asks for elicitation on a modern call, even after a legacy initialize that declared it", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: { elicitation: {} }, clientInfo: { name: "claude-code", version: "1" } } };
+    await runRelay(dir, panel.port, [init, modern(2, "tools/call", { name: "ae_status", arguments: {} }), callStatus(3)]);
+    const byMethod = (id: number) => panel.seen.find((s) => s.body.id === id)!;
+    expect(byMethod(2).headers["x-chroma-elicitation"]).toBeUndefined();
+    expect(byMethod(2).headers["mcp-protocol-version"]).toBe("2026-07-28");
+    // The legacy call keeps its header and gets no modern ones.
+    expect(byMethod(3).headers["x-chroma-elicitation"]).toBe("1");
+    expect(byMethod(3).headers["mcp-protocol-version"]).toBeUndefined();
+    expect(byMethod(3).headers["mcp-method"]).toBeUndefined();
+  });
+
+  it("a client that probes with server/discover and then falls back to initialize is still observed at the initialize", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    const stderr: string[] = [];
+    const init = { jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: { elicitation: {} }, clientInfo: { name: "fallback-client", version: "1" } } };
+    await runRelay(dir, panel.port, [modern(1, "server/discover"), init, callStatus(3)], { stderr });
+    const call = panel.seen.find((s) => s.body.id === 3)!;
+    expect(call.headers["x-chroma-elicitation"]).toBe("1");
+    expect(call.headers["x-chroma-client"]).toBe("fallback-client");
+    // The toolset line is still written once.
+    expect(stderr.filter((l) => /\btoolset (core|full) \(/.test(l))).toHaveLength(1);
+  });
+
+  it("a request with a legacy version in _meta is sent as a legacy one", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    await runRelay(dir, panel.port, [modern(1, "tools/list", {}, { [PV]: "2025-06-18" })]);
+    expect(panel.seen[0].headers["mcp-protocol-version"]).toBeUndefined();
+    expect(panel.seen[0].headers["mcp-method"]).toBeUndefined();
+  });
+
+  it("takes X-Chroma-Client from the request's _meta clientInfo, and logs the toolset choice once", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ok(body, {}));
+    const stderr: string[] = [];
+    await runRelay(
+      dir,
+      panel.port,
+      [
+        modern(1, "tools/list", {}, mmeta({ [CINFO]: { name: "Some Client\r\nX-Evil: 1", version: "2" } })),
+        modern(2, "tools/list", {}, mmeta({ [CINFO]: { name: "other", version: "2" } })),
+        modern(3, "tools/list", {}, mmeta({ [CINFO]: { version: "2" } })),
+      ],
+      { stderr }
+    );
+    const clientOf = (id: number) => panel.seen.find((s) => s.body.id === id)!.client;
+    expect(clientOf(1)).toBe("Some Client X-Evil: 1");
+    expect(clientOf(2)).toBe("other");
+    expect(clientOf(3)).toMatch(/^(Some Client X-Evil: 1|other)$/); // no name of its own: the one the relay knows
+    const lines = stderr.filter((l) => l.includes("toolset ") && l.includes("client "));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("toolset core (default core); client ");
+  });
+
+  it("passes the panel's 400 and 404 JSON-RPC error bodies through unchanged", async () => {
+    const { dir } = home();
+    const bad = { code: -32022, message: "Unsupported protocol version", data: { supported: ALL_VERSIONS, requested: "2099-01-01" } };
+    const missing = { code: -32601, message: "Method not found: ping" };
+    const panel = await fakePanel((body) =>
+      body.method === "ping"
+        ? { status: 404, body: { jsonrpc: "2.0", id: body.id, error: missing } }
+        : { status: 400, body: { jsonrpc: "2.0", id: body.id, error: bad } }
+    );
+    const replies = await runRelay(dir, panel.port, [modern(1, "tools/list", {}, mmeta({ [PV]: "2099-01-01" })), modern(2, "ping")]);
+    expect(replies[0]).toEqual({ jsonrpc: "2.0", id: 1, error: bad });
+    expect(replies[1]).toEqual({ jsonrpc: "2.0", id: 2, error: missing });
+  });
+
+  it("caches a modern list reply like a legacy one, and the instructions from server/discover", async () => {
+    const { dir, dataDir } = home();
+    const panel = await fakePanel((body) => {
+      if (body.method === "tools/list") return ok(body, { tools: [TOOLS[0], { name: "ae_search_tools", description: "s", inputSchema: { type: "object" } }], resultType: "complete" });
+      if (body.method === "server/discover") return ok(body, { supportedVersions: ALL_VERSIONS, instructions: "MODERN CORE INSTRUCTIONS", resultType: "complete" });
+      return ok(body, {});
+    });
+    await runRelay(dir, panel.port, [modern(1, "tools/list"), modern(2, "server/discover")]);
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-core-cache.json"), "utf8")).tools).toHaveLength(2);
+    expect(JSON.parse(fs.readFileSync(path.join(dataDir, "relay-instructions-core-cache.json"), "utf8"))).toEqual({ instructions: "MODERN CORE INSTRUCTIONS" });
+    // A full-toolset discover keeps no instructions.
+    const { dir: dir2, dataDir: data2 } = home();
+    await runRelay(dir2, panel.port, [modern(1, "server/discover")], { toolset: "full" });
+    expect(fs.existsSync(path.join(data2, "relay-instructions-core-cache.json"))).toBe(false);
+  });
+
+  describe("while AE is closed", () => {
+    const offline = (dir: string, messages: unknown[], opts: Parameters<typeof runRelay>[3] = {}) => closedPort().then((port) => runRelay(dir, port, messages, opts));
+    const expectModern = (r: any, scope?: "private" | "public") => {
+      expect(r.result.resultType).toBe("complete");
+      expect(r.result._meta[SINFO].name).toBe("chroma-ae-mcp");
+      expect(r.result._meta[SINFO].version).toMatch(/^\d+\.\d+\.\d+/);
+      if (scope) {
+        expect(r.result.ttlMs).toBe(0);
+        expect(r.result.cacheScope).toBe(scope);
+      }
+    };
+
+    it("answers server/discover itself, with the instructions from the cache for core", async () => {
+      const { dir, dataDir } = home();
+      const bare = await offline(dir, [modern(1, "server/discover")]);
+      expectModern(bare[0], "private");
+      expect(bare[0].result.supportedVersions).toEqual(ALL_VERSIONS);
+      expect(bare[0].result.capabilities).toEqual({
+        tools: { listChanged: false },
+        prompts: { listChanged: false },
+        resources: { subscribe: false, listChanged: false },
+        extensions: { "io.modelcontextprotocol/skills": {} },
+      });
+      expect(bare[0].result).not.toHaveProperty("instructions");
+      fs.writeFileSync(path.join(dataDir, "relay-instructions-core-cache.json"), JSON.stringify({ instructions: "CACHED" }));
+      const core = await offline(dir, [modern(1, "server/discover")], { toolset: "core" });
+      expect(core[0].result.instructions).toBe("CACHED");
+      const full = await offline(dir, [modern(1, "server/discover")], { toolset: "full" });
+      expect(full[0].result).not.toHaveProperty("instructions");
+    });
+
+    it("answers the lists in the modern shape, from caches a modern reply and a legacy reply wrote", async () => {
+      const { dir } = home();
+      const panel = await fakePanel((body) => {
+        const modernReq = body.params && body.params._meta;
+        const extra = modernReq ? { resultType: "complete", ttlMs: 300000, cacheScope: "public" } : {};
+        if (body.method === "tools/list") return ok(body, { tools: CORE_LIST, ...extra });
+        if (body.method === "prompts/list") return ok(body, { prompts: [{ name: "motion_review" }], ...extra });
+        if (body.method === "resources/list") return ok(body, { resources: [{ uri: "chroma-ae://guidance/a.md", name: "a" }], ...extra });
+        return ok(body, {});
+      });
+      const CORE_LIST = [{ name: "ae_search_tools", description: "s", inputSchema: { type: "object" } }];
+      // tools and resources from modern replies; prompts from a legacy one.
+      await runRelay(dir, panel.port, [modern(1, "tools/list"), { jsonrpc: "2.0", id: 2, method: "prompts/list" }, modern(3, "resources/list")]);
+      const r = await offline(dir, [modern(1, "tools/list"), modern(2, "prompts/list"), modern(3, "resources/list"), modern(4, "resources/templates/list")]);
+      expectModern(r[0], "private");
+      expect(r[0].result.tools).toEqual(CORE_LIST);
+      expectModern(r[1], "public");
+      expect(r[1].result.prompts).toEqual([{ name: "motion_review" }]);
+      expectModern(r[2], "public");
+      expect(r[2].result.resources).toEqual([{ uri: "chroma-ae://guidance/a.md", name: "a" }]);
+      expectModern(r[3], "public");
+      expect(r[3].result.resourceTemplates).toEqual([]);
+    });
+
+    it("keeps the modern resources list apart from the legacy one", async () => {
+      const { dir, dataDir } = home();
+      const LEGACY = [{ uri: "chroma-ae://guidance/a.md", name: "a" }];
+      const MODERN = [{ uri: SKILL_URI, name: "captions" }];
+      const panel = await fakePanel((body) => {
+        if (body.method === "resources/list") return ok(body, { resources: body.params && body.params._meta ? MODERN : LEGACY });
+        return ok(body, {});
+      });
+      await runRelay(dir, panel.port, [{ jsonrpc: "2.0", id: 1, method: "resources/list" }]);
+      const legacyFile = path.join(dataDir, "relay-resources-cache.json");
+      const before = fs.readFileSync(legacyFile, "utf8");
+      expect(JSON.parse(before)).toEqual({ resources: LEGACY });
+      await runRelay(dir, panel.port, [modern(1, "resources/list")]);
+      expect(fs.readFileSync(legacyFile, "utf8")).toBe(before);
+      expect(JSON.parse(fs.readFileSync(path.join(dataDir, "relay-resources-modern-cache.json"), "utf8"))).toEqual({ resources: MODERN });
+      const r = await offline(dir, [modern(1, "resources/list"), { jsonrpc: "2.0", id: 2, method: "resources/list" }]);
+      expect(r[0].result.resources).toEqual(MODERN);
+      expect(r[1].result).toEqual({ resources: LEGACY });
+    });
+
+    it("has the same fallbacks as legacy: empty prompts and resources, the full tool list for core, -32603 for no tools", async () => {
+      const { dir, dataDir } = home();
+      const none = await offline(dir, [modern(1, "tools/list"), modern(2, "prompts/list"), modern(3, "resources/list"), modern(4, "skills/list")]);
+      expect(none[0].error.code).toBe(-32603);
+      expect(none[0].error.message).toMatch(/not reachable/);
+      expect(none[1].result.prompts).toEqual([]);
+      expect(none[2].result.resources).toEqual([]);
+      expectModern(none[3], "public");
+      expect(none[3].result.skills).toEqual([]);
+      fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+      const core = await offline(dir, [modern(1, "tools/list")], { toolset: "core" });
+      expect(core[0].result.tools).toEqual(TOOLS);
+    });
+
+    it("answers a tool call as an isError text in the modern shape", async () => {
+      const { dir } = home();
+      const r = await offline(dir, [modern(1, "tools/call", { name: "ae_status", arguments: {} })]);
+      expectModern(r[0]);
+      expect(r[0].result.isError).toBe(true);
+      expect(r[0].result.content[0].text).toMatch(/Start After Effects/);
+      expect(r[0].result).not.toHaveProperty("ttlMs");
+    });
+
+    it("serves resources/read and prompts/get from the guidance text the panel served, and -32602 when not found", async () => {
+      const { dir } = home();
+      const ctx = {} as ToolContext;
+      const server = http.createServer((req, res) => {
+        let text = "";
+        req.on("data", (c) => (text += c));
+        req.on("end", async () => {
+          const out = await handleRpc(JSON.parse(text), ctx);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(out));
+        });
+      });
+      servers.push(server);
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+      await runRelay(dir, (server.address() as AddressInfo).port, [{ jsonrpc: "2.0", id: 1, method: "prompts/list" }]);
+
+      const skill = "chroma-ae://guidance/motion-director/SKILL.md";
+      const r = await offline(dir, [
+        modern(1, "resources/read", { uri: skill }),
+        modern(2, "prompts/get", { name: "motion_director" }),
+        modern(3, "prompts/get", { name: "motion_director", arguments: { task: "  a 6 s logo sting " } }),
+        modern(4, "resources/read", { uri: "chroma-ae://guidance/nope.md" }),
+        modern(5, "prompts/get", { name: "nope" }),
+      ]);
+      const legacy = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: skill } }, ctx)) as any;
+      expectModern(r[0], "public");
+      expect(r[0].result.contents).toEqual(legacy.result.contents);
+      const plain = (await handleRpc({ jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "motion_director" } }, ctx)) as any;
+      expectModern(r[1]);
+      expect(r[1].result.messages).toEqual(plain.result.messages);
+      expect(r[2].result.messages[0].content.text).toContain("a 6 s logo sting");
+      expect(r[3].error).toMatchObject({ code: -32602, data: { uri: "chroma-ae://guidance/nope.md" } });
+      expect(r[4].error.code).toBe(-32602);
+    });
+
+    it("says -32603 with the reason for resources/read and prompts/get when no guidance was ever cached", async () => {
+      const { dir } = home();
+      const r = await offline(dir, [modern(1, "resources/read", { uri: "x" }), modern(2, "prompts/get", { name: "x" })]);
+      for (const reply of r) {
+        expect(reply.error.code).toBe(-32603);
+        expect(reply.error.message).toMatch(/not reachable/);
+      }
+    });
+
+    it("answers skills/list, skills/get and a skill file's resources/read from the cache the panel filled", async () => {
+      const { dir, dataDir } = home();
+      const panel = await fakePanel((body) => {
+        if (body.method === "skills/list") return ok(body, { skills: SKILLS, resultType: "complete" });
+        if (body.method === "resources/read") return ok(body, { contents: skillContents(body.params.uri), resultType: "complete" });
+        return ok(body, {});
+      });
+      const online = await runRelay(dir, panel.port, [modern(1, "skills/list")]);
+      expect(online[0].result.skills).toEqual(SKILLS);
+      // The relay read each listed file as a modern request of its own.
+      const reads = panel.seen.filter((s) => s.body.method === "resources/read");
+      expect(reads.map((s) => s.body.params.uri).sort()).toEqual([SKILL_URI, SKILL_REF].sort());
+      for (const s of reads) {
+        expect(s.body.params._meta).toMatchObject({ [PV]: "2026-07-28", [CAPS]: {}, [CINFO]: { name: "chroma-ae-relay" } });
+        expect(s.headers["mcp-protocol-version"]).toBe("2026-07-28");
+        expect(s.headers["mcp-method"]).toBe("resources/read");
+        expect(s.headers["mcp-name"]).toBe(s.body.params.uri);
+        expect(s.headers["x-chroma-client"]).toBe("chroma-ae-relay");
+      }
+      expect(fs.readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+      // A skills prefetch alone leaves no guidance contents cache; the files live in the skills cache.
+      expect(fs.existsSync(path.join(dataDir, "relay-contents-cache.json"))).toBe(false);
+      expect(Object.keys(JSON.parse(fs.readFileSync(path.join(dataDir, "relay-skills-cache.json"), "utf8")).files).sort()).toEqual([SKILL_URI, SKILL_REF].sort());
+      // A legacy offline resources/read of a skill:// URI stays -32002 (and there is no guidance cache: -32000).
+      const legacy = await offline(dir, [{ jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: SKILL_URI } }]);
+      expect(legacy[0].error.code).toBe(-32000);
+
+      const r = await offline(dir, [
+        modern(1, "skills/list"),
+        modern(2, "skills/get", { uri: SKILL_URI }),
+        modern(3, "resources/read", { uri: SKILL_REF }),
+        modern(4, "skills/get", { uri: "skill://nope/SKILL.md" }),
+        modern(5, "skills/get", {}),
+        modern(6, "resources/read", { uri: "skill://captions/missing.md" }),
+      ]);
+      expectModern(r[0], "public");
+      expect(r[0].result.skills).toEqual(SKILLS);
+      expectModern(r[1], "public");
+      expect(r[1].result.skill).toEqual(SKILLS[0]);
+      expectModern(r[2], "public");
+      expect(r[2].result.contents).toEqual(skillContents(SKILL_REF));
+      expect(r[3].error).toMatchObject({ code: -32602, message: "No skill is served at skill://nope/SKILL.md" });
+      expect(r[4].error.code).toBe(-32602);
+      expect(r[5].error).toMatchObject({ code: -32602, data: { uri: "skill://captions/missing.md" } });
+    });
+
+    it("answers skills/get with -32603 when no skills cache exists", async () => {
+      const { dir } = home();
+      const r = await offline(dir, [modern(1, "skills/get", { uri: SKILL_URI })]);
+      expect(r[0].error.code).toBe(-32603);
+      expect(r[0].error.message).toMatch(/not reachable/);
+    });
+
+    it("keeps the guidance and the skill files both, whichever prefetch runs first", async () => {
+      const { dir } = home();
+      const GUIDE = "chroma-ae://guidance/a.md";
+      const panel = await fakePanel((body) => {
+        const isModern = !!(body.params && body.params._meta);
+        if (body.method === "skills/list") return ok(body, { skills: SKILLS });
+        if (body.method === "resources/list") return ok(body, { resources: [{ uri: GUIDE, name: "a" }] });
+        if (body.method === "prompts/list") return ok(body, { prompts: [] });
+        if (body.method === "resources/read") {
+          return ok(body, { contents: isModern ? skillContents(body.params.uri) : [{ uri: GUIDE, mimeType: "text/markdown", text: "guide" }] });
+        }
+        return ok(body, {});
+      });
+      await runRelay(dir, panel.port, [{ jsonrpc: "2.0", id: 1, method: "resources/list" }, modern(2, "skills/list"), { jsonrpc: "2.0", id: 3, method: "prompts/list" }]);
+      const r = await offline(dir, [modern(1, "resources/read", { uri: GUIDE }), modern(2, "resources/read", { uri: SKILL_URI }), modern(3, "resources/read", { uri: SKILL_REF })]);
+      expect(r[0].result.contents[0].text).toBe("guide");
+      expect(r[1].result.contents).toEqual(skillContents(SKILL_URI));
+      expect(r[2].result.contents).toEqual(skillContents(SKILL_REF));
+      const legacyRead = await offline(dir, [{ jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: SKILL_URI } }]);
+      expect(legacyRead[0].error.code).toBe(-32002);
+      // A second run's guidance prefetch rewrites the contents cache and leaves the skill files.
+      await runRelay(dir, panel.port, [{ jsonrpc: "2.0", id: 1, method: "resources/list" }]);
+      const again = await offline(dir, [modern(1, "resources/read", { uri: SKILL_REF }), modern(2, "resources/read", { uri: GUIDE })]);
+      expect(again[0].result.contents).toEqual(skillContents(SKILL_REF));
+      expect(again[1].result.contents[0].text).toBe("guide");
+    });
+
+    it("a failing skills prefetch (an older panel) leaves the guidance cache alone and caches no skills", async () => {
+      const { dir, dataDir } = home();
+      const panel = await fakePanel((body) => {
+        const isModern = !!(body.params && body.params._meta);
+        if (body.method === "skills/list") return ok(body, { skills: SKILLS });
+        if (body.method === "resources/list") return ok(body, { resources: [{ uri: "chroma-ae://guidance/a.md" }] });
+        if (body.method === "prompts/list") return ok(body, { prompts: [] });
+        if (body.method === "resources/read" && isModern) return { status: 400, body: { jsonrpc: "2.0", id: body.id, error: { code: -32602, message: "nope" } } };
+        if (body.method === "resources/read") return ok(body, { contents: [{ uri: "chroma-ae://guidance/a.md", text: "guide" }] });
+        return ok(body, {});
+      });
+      const stderr: string[] = [];
+      const online = await runRelay(dir, panel.port, [modern(1, "skills/list"), { jsonrpc: "2.0", id: 2, method: "resources/list" }, { jsonrpc: "2.0", id: 3, method: "prompts/list" }], { stderr });
+      expect(online[0].result.skills).toEqual(SKILLS);
+      expect(stderr.some((l) => l.includes("could not fetch the skills"))).toBe(true);
+      expect(fs.existsSync(path.join(dataDir, "relay-skills-cache.json"))).toBe(false);
+      const guide = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-contents-cache.json"), "utf8"));
+      expect(Object.keys(guide.resources)).toEqual(["chroma-ae://guidance/a.md"]);
+    });
+
+    it("mirrors the panel's validation: unsupported version, missing capabilities, missing _meta version", async () => {
+      const { dir } = home();
+      const r = await offline(dir, [
+        modern(1, "tools/list", {}, mmeta({ [PV]: "2099-01-01" })),
+        modern(2, "tools/list", {}, { [PV]: "2026-07-28" }),
+        modern(3, "tools/list", {}, mmeta({ [PV]: 5 })),
+        { jsonrpc: "2.0", id: 4, method: "server/discover" },
+        { jsonrpc: "2.0", id: 5, method: "skills/list", params: {} },
+        { jsonrpc: "2.0", id: 6, method: "skills/get", params: { uri: SKILL_URI, _meta: {} } },
+        modern(7, "tools/list", {}, { [PV]: "2026-07-28", [CAPS]: [] }),
+      ]);
+      expect(r[0].error).toEqual({ code: -32022, message: "Unsupported protocol version", data: { supported: ALL_VERSIONS, requested: "2099-01-01" } });
+      expect(r[1].error.code).toBe(-32602);
+      expect(r[1].error.message).toContain(CAPS);
+      expect(r[2].error).toMatchObject({ code: -32022, data: { requested: 5 } });
+      for (const i of [3, 4, 5]) {
+        expect(r[i].error.code, String(i)).toBe(-32602);
+        expect(r[i].error.data).toEqual({ supported: ALL_VERSIONS });
+        expect(r[i].error.message).toContain(PV);
+      }
+      expect(r[6].error.code).toBe(-32602);
+    });
+
+    it("treats a legacy version string in _meta as legacy, answered exactly as without it", async () => {
+      const { dir, dataDir } = home();
+      fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+      const r = await offline(dir, [modern(1, "tools/list", {}, { [PV]: "2025-06-18" }), modern(2, "resources/list", {}, { [PV]: "2025-03-26" })], { toolset: "full" });
+      expect(r[0].result).toEqual({ tools: TOOLS });
+      expect(r[1].result).toEqual({ resources: [] });
+    });
+
+    it("answers any other modern method with -32601, and notifications with nothing", async () => {
+      const { dir } = home();
+      const r = await offline(dir, [
+        modern(1, "ping"),
+        modern(2, "initialize", { protocolVersion: "2025-06-18" }),
+        modern(3, "subscriptions/listen"),
+        { jsonrpc: "2.0", method: "notifications/cancelled", params: { _meta: mmeta() } },
+      ]);
+      expect(r).toHaveLength(3);
+      for (const reply of r) expect(reply.error.code).toBe(-32601);
+      expect(r[0].error.message).toBe("Method not found: ping");
+    });
   });
 });

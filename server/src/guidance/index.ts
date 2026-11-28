@@ -35,6 +35,12 @@ const CAPTIONS_DESCRIPTIONS: Record<string, string> = {
   "references/timing-and-breaks.md": "Timing, line breaks and shot-change rules, in order of operations.",
 };
 
+/** The legacy per-file descriptions, keyed by skill folder under server/guidance/ (the other skills have none). */
+export const GUIDANCE_DESCRIPTIONS_BY_DIR: Record<string, Record<string, string>> = {
+  "motion-director": DESCRIPTIONS,
+  captions: CAPTIONS_DESCRIPTIONS,
+};
+
 function titleOf(rel: string, text: string): string {
   const m = /^#\s+(.+)$/m.exec(text);
   return m ? m[1].trim() : rel;

@@ -26,6 +26,23 @@
 //   reason. The tool list cache is kept per toolset.
 // - X-Chroma-Client carries the client's name (sanitised, at most 40 characters) on every
 //   request once known; the panel's usage log records it.
+// - MCP revision 2026-07-28 (and the Skills extension). A request whose params carry
+//   _meta["io.modelcontextprotocol/protocolVersion"] is "modern": no initialize, every request
+//   stands alone. Online it is posted as is, plus the headers a 2026-07-28 HTTP client sends
+//   (MCP-Protocol-Version, Mcp-Method, Mcp-Name for tools/call, prompts/get and resources/read;
+//   a value that is not plain printable ASCII goes as =?base64?...?=), and never
+//   X-Chroma-Elicitation. X-Chroma-Client comes from the request's _meta clientInfo when it has a
+//   name. The panel's 400 and 404 JSON-RPC error bodies pass through unchanged.
+//   * The first modern request with a client name fixes the client name and logs the toolset
+//     choice, as the first initialize does.
+//   * server/discover fills the instructions cache (core), and after the panel answers a modern
+//     skills/list the relay keeps the skill entries and reads every file they list through the panel
+//     into the skills cache beside the entries (once per process, serialised with the guidance prefetch;
+//     the guidance contents cache is not touched, and a legacy offline resources/read never serves them).
+//   * While AE is closed a modern request is answered the way the panel would, in the modern shape
+//     (resultType, serverInfo in _meta, ttlMs 0, cacheScope): server/discover is built in, the lists,
+//     prompts/get, resources/read, skills/list and skills/get come from the caches, and the
+//     validation errors (-32022, -32602, -32601) mirror the panel. Legacy requests are unchanged.
 "use strict";
 
 const fs = require("fs");
@@ -141,6 +158,14 @@ const TOKEN_PATH = path.join(dataDir(), "token");
 
 // Keep in step with server/src/mcp-rpc.ts.
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const MODERN_PROTOCOL_VERSIONS = ["2026-07-28"];
+const ALL_PROTOCOL_VERSIONS = MODERN_PROTOCOL_VERSIONS.concat(SUPPORTED_PROTOCOL_VERSIONS);
+const META_VERSION = "io.modelcontextprotocol/protocolVersion";
+const META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
+const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
+const SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
+const SKILL_URI_PREFIX = "skill://";
 // The version comes from the repo's VERSION file (relay at panel/tools/), or, in the packaged
 // extension where scripts/package.ps1 stamps CSXS/manifest.xml instead, from the manifest's
 // ExtensionBundleVersion. Falls back to 0.0.0.
@@ -193,10 +218,65 @@ function observeInitialize(message) {
     const caps = m.params && typeof m.params === "object" && m.params.capabilities && typeof m.params.capabilities === "object" ? m.params.capabilities : {};
     clientElicits = !!caps.elicitation && typeof caps.elicitation === "object";
     toolsetDecided = true;
-    let why;
-    why = ENV_TOOLSET.set ? "env" : "default core";
-    log("toolset " + TOOLSET.toolset + " (" + why + "); client " + JSON.stringify(clientName || "unknown"));
+    logToolsetOnce();
   }
+}
+
+// The toolset line goes to stderr once per process, whichever comes first: an initialize or a modern request.
+let toolsetLogged = false;
+function logToolsetOnce() {
+  if (toolsetLogged) return;
+  toolsetLogged = true;
+  log("toolset " + TOOLSET.toolset + " (" + (ENV_TOOLSET.set ? "env" : "default core") + "); client " + JSON.stringify(clientName || "unknown"));
+}
+
+// A modern request has no initialize: its _meta clientInfo names the client. The first one with a
+// name fixes the client name (if none is known) and logs the toolset choice once. It does not count as the
+// initialize: a client that probes with server/discover and then falls back to initialize is still observed
+// there (its name and whether it elicits).
+function observeModern(message) {
+  const info = modernInfo(message);
+  if (!info || !info.client) return;
+  if (!clientName) clientName = info.client;
+  logToolsetOnce();
+}
+
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+// The request's _meta protocol version, or undefined.
+function metaVersion(msg) {
+  const meta = isPlainObject(msg) && isPlainObject(msg.params) ? msg.params._meta : undefined;
+  return isPlainObject(meta) ? meta[META_VERSION] : undefined;
+}
+
+// What the relay needs to know about a modern request (a request with an id, whose _meta names a
+// protocol version that is not one of the legacy revisions), or null. client is the sanitised
+// _meta clientInfo name, "" when there is none.
+function modernInfo(msg) {
+  if (!isPlainObject(msg) || !hasId(msg) || typeof msg.method !== "string") return null;
+  const v = metaVersion(msg);
+  if (typeof v !== "string" || SUPPORTED_PROTOCOL_VERSIONS.indexOf(v) >= 0) return null;
+  const info = msg.params._meta[META_CLIENT_INFO];
+  let name;
+  if (msg.method === "tools/call" || msg.method === "prompts/get") name = msg.params.name;
+  else if (msg.method === "resources/read") name = msg.params.uri;
+  return {
+    version: v,
+    method: msg.method,
+    name: typeof name === "string" ? name : undefined,
+    client: isPlainObject(info) ? sanitizeClientName(info.name) : "",
+  };
+}
+
+// A header value that is not plain printable ASCII, has leading or trailing whitespace, or itself
+// looks like the Base64 sentinel goes as =?base64?<base64 of UTF-8>?= (streamable HTTP, Value Encoding).
+function encodeHeaderValue(v) {
+  if (/[^ -~]/.test(v) || v !== v.trim() || /^=\?base64\?.*\?=$/i.test(v)) {
+    return "=?base64?" + Buffer.from(v, "utf8").toString("base64") + "?=";
+  }
+  return v;
 }
 
 function send(msg) {
@@ -211,8 +291,10 @@ function readToken() {
   }
 }
 
-function post(bodyText) {
+// modern: the modernInfo() of the request in bodyText, or null/undefined for everything else.
+function post(bodyText, modern) {
   const token = readToken();
+  const client = modern && modern.client ? modern.client : clientName;
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -231,8 +313,18 @@ function post(bodyText) {
           // The panel is stateless, so the choice goes with every request, full included (the
           // panel's default is core).
           { "X-Chroma-Toolset": TOOLSET.toolset },
-          clientName ? { "X-Chroma-Client": clientName } : {},
-          clientElicits ? { "X-Chroma-Elicitation": "1" } : {}
+          client ? { "X-Chroma-Client": client } : {},
+          // A 2026-07-28 server never sends the client a request, so a modern call never asks for elicitation.
+          clientElicits && !modern ? { "X-Chroma-Elicitation": "1" } : {},
+          modern
+            ? Object.assign(
+                {
+                  "MCP-Protocol-Version": encodeHeaderValue(modern.version),
+                  "Mcp-Method": encodeHeaderValue(modern.method),
+                },
+                modern.name !== undefined ? { "Mcp-Name": encodeHeaderValue(modern.name) } : {}
+              )
+            : {}
         ),
       },
       (res) => {
@@ -288,6 +380,9 @@ function hasId(msg) {
 
 // The last lists the panel served, one file per key so several relay processes (Claude Desktop
 // can start more than one) never read-modify-write a shared file. Each holds {<key>: [...]}.
+// The modern resources/list names the skill files, the legacy one the guidance resources, so each
+// era has its own cache file (tools and prompts lists are the same in both eras).
+const MODERN_RESOURCES_FILE = "resources-modern";
 const LIST_RESULT_KEY = { "tools/list": "tools", "prompts/list": "prompts", "resources/list": "resources" };
 
 function cachePath(key) {
@@ -301,9 +396,10 @@ function listFileKey(key) {
   return key === "tools" && TOOLSET.toolset === "core" ? "tools-core" : key;
 }
 
-function readListCache(key) {
+// fileKey names a cache file apart from the key's own (the modern resources list, see below).
+function readListCache(key, fileKey) {
   try {
-    const cached = JSON.parse(fs.readFileSync(cachePath(listFileKey(key)), "utf8"));
+    const cached = JSON.parse(fs.readFileSync(cachePath(fileKey || listFileKey(key)), "utf8"));
     return cached && Array.isArray(cached[key]) ? cached[key] : null;
   } catch {
     return null;
@@ -322,9 +418,9 @@ function readFullToolsCache() {
   }
 }
 
-function writeListCache(key, list) {
+function writeListCache(key, list, fileKey) {
   try {
-    const file = cachePath(listFileKey(key));
+    const file = cachePath(fileKey || listFileKey(key));
     const tmp = file + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify({ [key]: list }));
     fs.renameSync(tmp, file);
@@ -385,15 +481,85 @@ function writeContentCache(c) {
   }
 }
 
+// The skills cache: { skills: [entries], files: { <skill:// uri>: contents[] } }, written whole.
+function writeSkillsCache(skills, files) {
+  try {
+    const file = cachePath("skills");
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ skills, files }));
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    log("could not cache the skills: " + err.message);
+  }
+}
+
+function readSkillFiles() {
+  try {
+    const c = JSON.parse(fs.readFileSync(cachePath("skills"), "utf8"));
+    return c && isPlainObject(c.files) ? c.files : null;
+  } catch {
+    return null;
+  }
+}
+
 let prefetched = false;
+let skillsPrefetched = false;
 let warnedOldPanel = false;
 let prefetchId = 0;
+// Prefetches write the same cache file, so they run one after another.
+let prefetchChain = Promise.resolve();
+function runPrefetch(task) {
+  prefetchChain = prefetchChain.then(task).catch(() => {});
+  return prefetchChain;
+}
 
 async function ask(method, params) {
   const res = await post(JSON.stringify({ jsonrpc: "2.0", id: "relay-prefetch-" + ++prefetchId, method, params }));
   const body = JSON.parse(res.text);
   if (!body || !body.result) throw new Error(method + " failed: " + JSON.stringify(body && body.error));
   return body.result;
+}
+
+// The relay's own modern requests (skill files). The panel needs no initialize for them.
+async function askModern(method, params) {
+  const msg = {
+    jsonrpc: "2.0",
+    id: "relay-prefetch-" + ++prefetchId,
+    method,
+    params: Object.assign({}, params, {
+      _meta: {
+        [META_VERSION]: MODERN_PROTOCOL_VERSIONS[0],
+        [META_CAPABILITIES]: {},
+        [META_CLIENT_INFO]: { name: "chroma-ae-relay", version: SERVER_INFO.version },
+      },
+    }),
+  };
+  const res = await post(JSON.stringify(msg), modernInfo(msg));
+  const body = JSON.parse(res.text);
+  if (!body || !body.result) throw new Error(method + " failed: " + JSON.stringify(body && body.error));
+  return body.result;
+}
+
+// Once per process, after the panel answered a modern skills/list: keep the skill entries and read
+// every file they list (into the skills cache, by URI; the guidance contents cache is not touched),
+// so skills/get and resources/read of a skill file work while AE is closed. All or nothing: one failed read keeps the old cache.
+// An older panel that does not know skills/list never gets here.
+async function prefetchSkills(skills) {
+  if (skillsPrefetched) return;
+  skillsPrefetched = true;
+  try {
+    const files = {};
+    for (const skill of skills) {
+      const resources = skill && Array.isArray(skill.resources) ? skill.resources : [];
+      for (const r of resources) {
+        if (r && typeof r.uri === "string" && !(r.uri in files)) files[r.uri] = (await askModern("resources/read", { uri: r.uri })).contents;
+      }
+    }
+    writeSkillsCache(skills, files);
+  } catch (err) {
+    skillsPrefetched = false;
+    log("could not fetch the skills: " + (err && err.message ? err.message : String(err)));
+  }
 }
 
 // Once per process, after the panel answered a list: fetch every prompt and resource it serves.
@@ -428,11 +594,143 @@ function cachedPrompt(entry, args) {
   return JSON.parse(JSON.stringify(entry.marked), (_k, v) => (typeof v === "string" ? v.split(ARG_MARK).join(value) : v));
 }
 
+// The tool list for tools/list while the panel cannot answer: the toolset's cache, or for core the
+// full cache; null when there is none.
+function cachedToolList() {
+  let list = readListCache("tools");
+  if (!list && TOOLSET.toolset === "core") {
+    // An upgrader from 0.7.0 has only the full cache. A full list beats a session with no
+    // tools (listChanged is false, so Desktop would not ask again).
+    list = readFullToolsCache();
+    if (list && !warnedCoreCacheFallback) {
+      warnedCoreCacheFallback = true;
+      log("no core tools cache yet; answering tools/list from the full cache until AE has served the core list once");
+    }
+  }
+  return list;
+}
+
+// Keep in step with server/src/mcp-modern.ts: the panel's modern error codes.
+function rpcError(id, code, message, data) {
+  return { jsonrpc: "2.0", id, error: Object.assign({ code, message }, data !== undefined ? { data } : {}) };
+}
+
+// How the panel classifies a request (server/src/mcp-modern.ts): "modern", "legacy", or an error reply.
+function classifyOffline(msg, params) {
+  const meta = isPlainObject(params._meta) ? params._meta : {};
+  const v = meta[META_VERSION];
+  if (v === undefined) {
+    if (msg.method === "server/discover" || msg.method === "skills/list" || msg.method === "skills/get") {
+      return rpcError(
+        msg.id, -32602,
+        "Invalid params: " + msg.method + " needs _meta[\"" + META_VERSION + "\"] (" + MODERN_PROTOCOL_VERSIONS[0] + ")",
+        { supported: ALL_PROTOCOL_VERSIONS }
+      );
+    }
+    return "legacy";
+  }
+  if (typeof v === "string" && MODERN_PROTOCOL_VERSIONS.indexOf(v) >= 0) {
+    if (!isPlainObject(meta[META_CAPABILITIES])) {
+      return rpcError(msg.id, -32602, "Invalid params: missing _meta[\"" + META_CAPABILITIES + "\"]");
+    }
+    return "modern";
+  }
+  if (typeof v === "string" && SUPPORTED_PROTOCOL_VERSIONS.indexOf(v) >= 0) return "legacy";
+  return rpcError(msg.id, -32022, "Unsupported protocol version", { supported: ALL_PROTOCOL_VERSIONS, requested: v });
+}
+
+// A modern result: the payload plus resultType and the server's identity. cache: "private" or
+// "public" for the answers a client may cache; the relay's own answers are never fresh for long, so ttlMs is 0.
+function modernResult(id, payload, cache) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    result: Object.assign({}, payload, cache ? { ttlMs: 0, cacheScope: cache } : {}, {
+      resultType: "complete",
+      _meta: { [META_SERVER_INFO]: SERVER_INFO },
+    }),
+  };
+}
+
+// The modern reply while the panel cannot answer (the panel's own shapes, from the caches).
+function modernOfflineReply(msg, params, reason) {
+  const id = msg.id;
+  switch (msg.method) {
+    case "server/discover": {
+      const instructions = readInstructionsCache();
+      return modernResult(
+        id,
+        Object.assign(
+          {
+            supportedVersions: ALL_PROTOCOL_VERSIONS,
+            capabilities: {
+              tools: { listChanged: false },
+              prompts: { listChanged: false },
+              resources: { subscribe: false, listChanged: false },
+              extensions: { [SKILLS_EXTENSION]: {} },
+            },
+          },
+          instructions ? { instructions } : {}
+        ),
+        "private"
+      );
+    }
+    case "tools/list": {
+      const tools = cachedToolList();
+      return tools ? modernResult(id, { tools }, "private") : rpcError(id, -32603, reason);
+    }
+    case "prompts/list":
+      return modernResult(id, { prompts: readListCache("prompts") || [] }, "public");
+    case "resources/list":
+      return modernResult(id, { resources: readListCache("resources", MODERN_RESOURCES_FILE) || [] }, "public");
+    case "resources/templates/list":
+      return modernResult(id, { resourceTemplates: [] }, "public");
+    case "tools/call":
+      return modernResult(id, { content: [{ type: "text", text: reason }], isError: true });
+    case "resources/read":
+    case "prompts/get": {
+      if (msg.method === "resources/read" && typeof params.uri === "string" && params.uri.startsWith(SKILL_URI_PREFIX)) {
+        const files = readSkillFiles();
+        if (!files) return rpcError(id, -32603, reason);
+        if (Object.prototype.hasOwnProperty.call(files, params.uri) && files[params.uri]) return modernResult(id, { contents: files[params.uri] }, "public");
+        return rpcError(id, -32602, "Resource not found: " + params.uri, { uri: params.uri });
+      }
+      const cache = readContentCache();
+      if (!cache) return rpcError(id, -32603, reason);
+      if (msg.method === "resources/read") {
+        const contents = typeof params.uri === "string" && Object.prototype.hasOwnProperty.call(cache.resources, params.uri) ? cache.resources[params.uri] : undefined;
+        if (contents) return modernResult(id, { contents }, "public");
+        return rpcError(id, -32602, "Resource not found: " + String(params.uri), { uri: params.uri });
+      }
+      const entry = typeof params.name === "string" && Object.prototype.hasOwnProperty.call(cache.prompts, params.name) ? cache.prompts[params.name] : undefined;
+      if (entry) return modernResult(id, cachedPrompt(entry, params.arguments));
+      return rpcError(id, -32602, "Invalid params: unknown prompt " + JSON.stringify(params.name) + ". Available: " + Object.keys(cache.prompts).join(", "));
+    }
+    case "skills/list":
+      return modernResult(id, { skills: readListCache("skills") || [] }, "public");
+    case "skills/get": {
+      if (typeof params.uri !== "string") return rpcError(id, -32602, "Invalid params: uri is required");
+      const skills = readListCache("skills");
+      if (!skills) return rpcError(id, -32603, reason);
+      const skill = skills.find((s) => s && s.uri === params.uri);
+      if (!skill) return rpcError(id, -32602, "No skill is served at " + params.uri);
+      return modernResult(id, { skill }, "public");
+    }
+    default:
+      return rpcError(id, -32601, "Method not found: " + String(msg.method));
+  }
+}
+
 // The reply for one message while the panel cannot answer, or null to send nothing.
 function offlineReply(msg, reason) {
   if (!hasId(msg)) return null;
   const id = msg.id;
   const params = (msg.params && typeof msg.params === "object") ? msg.params : {};
+  // Keep in step with server/src/mcp-rpc.ts (era classification): a request that names a 2026-07-28
+  // protocol version in _meta is answered in the modern shape; everything else as before.
+  const era = classifyOffline(msg, params);
+  if (typeof era === "object") return era;
+  if (era === "modern") return modernOfflineReply(msg, params, reason);
   switch (msg.method) {
     case "initialize": {
       const asked = params.protocolVersion;
@@ -558,9 +856,10 @@ async function relay(message) {
     }
     return;
   }
+  const modern = modernInfo(message);
   let res;
   try {
-    res = await post(JSON.stringify(message));
+    res = await post(JSON.stringify(message), modern);
   } catch (err) {
     if (!(err instanceof PanelUnavailable)) throw err;
     replyOffline(message, await reasonFor(message, err.message));
@@ -578,7 +877,7 @@ async function relay(message) {
       try { after = readToken(); } catch {}
       if (after && after !== res.token) {
         try {
-          res = await post(JSON.stringify(message));
+          res = await post(JSON.stringify(message), modern);
         } catch (err) {
           if (!(err instanceof PanelUnavailable)) throw err;
           replyOffline(message, await reasonFor(message, err.message));
@@ -628,7 +927,7 @@ async function relay(message) {
         log("the panel does not know the core toolset (no ae_search_tools in its list); showing its full list.");
       }
     } else {
-      writeListCache(listKey, body.result[listKey]);
+      writeListCache(listKey, body.result[listKey], modern && listKey === "resources" ? MODERN_RESOURCES_FILE : undefined);
     }
   }
   if (
@@ -640,9 +939,22 @@ async function relay(message) {
   ) {
     writeInstructionsCache(body.result.instructions);
   }
+  // A modern server/discover carries the same instructions as initialize.
+  if (
+    modern &&
+    message.method === "server/discover" &&
+    TOOLSET.toolset === "core" &&
+    body.result &&
+    typeof body.result.instructions === "string"
+  ) {
+    writeInstructionsCache(body.result.instructions);
+  }
   send(body);
   // After the reply, so the client never waits on it; the process stays up until it is written.
-  if (listKey === "prompts" || listKey === "resources") await prefetchContents();
+  if (listKey === "prompts" || listKey === "resources") await runPrefetch(prefetchContents);
+  if (modern && message.method === "skills/list" && body.result && Array.isArray(body.result.skills)) {
+    await runPrefetch(() => prefetchSkills(body.result.skills));
+  }
 }
 
 let pending = 0;
@@ -675,6 +987,7 @@ rl.on("line", (line) => {
     return;
   }
   observeInitialize(message);
+  observeModern(message);
   pending++;
   relay(message)
     .catch((err) => {

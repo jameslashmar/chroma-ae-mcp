@@ -1,9 +1,12 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { handleRpc, type JsonRpcErrorResponse, type JsonRpcSuccessResponse } from "../src/mcp-rpc.js";
-import { CAPTIONS_GUIDANCE_FILES, GUIDANCE_FILES } from "../src/guidance/content.generated.js";
+import { CAPTIONS_GUIDANCE_FILES, GUIDANCE_FILES, MCP_SKILLS, SKILL_TEXT } from "../src/guidance/content.generated.js";
+// @ts-expect-error plain ESM without types
+import { parseFrontmatter } from "../../scripts/skill-frontmatter.mjs";
 import type { ToolContext } from "../src/tools/common.js";
 
 const ctx = {} as ToolContext;
@@ -41,6 +44,35 @@ describe("motion guidance: generated module", () => {
     for (const rel of files) {
       const disk = fs.readFileSync(path.join(captionsDir, rel), "utf8").replace(/\r\n/g, "\n");
       expect(CAPTIONS_GUIDANCE_FILES[rel], rel).toBe(disk);
+    }
+  });
+
+  it("every skill folder is covered by SKILL_TEXT and MCP_SKILLS, in sync with disk", () => {
+    const dirs = fs
+      .readdirSync(guidanceRoot, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && fs.existsSync(path.join(guidanceRoot, e.name, "SKILL.md")))
+      .map((e) => e.name)
+      .sort();
+    expect(Object.keys(SKILL_TEXT).sort()).toEqual(dirs);
+    expect(MCP_SKILLS.map((s) => s.dir).sort()).toEqual(dirs);
+    expect(GUIDANCE_FILES).toBe(SKILL_TEXT["motion-director"]);
+    expect(CAPTIONS_GUIDANCE_FILES).toBe(SKILL_TEXT["captions"]);
+    for (const dirName of dirs) {
+      const base = path.join(guidanceRoot, dirName);
+      const files = walk(base);
+      expect(Object.keys(SKILL_TEXT[dirName]).sort(), dirName).toEqual(files);
+      const manifest = MCP_SKILLS.find((s) => s.dir === dirName)!;
+      expect(manifest.files[0].path).toBe("SKILL.md");
+      expect(manifest.files.map((f) => f.path).sort(), dirName).toEqual(files);
+      const disk0 = fs.readFileSync(path.join(base, "SKILL.md"), "utf8").replace(/\r\n/g, "\n");
+      expect(manifest.frontmatter, dirName).toEqual(parseFrontmatter(disk0).frontmatter);
+      expect(manifest.name).toBe(manifest.frontmatter.name);
+      for (const f of manifest.files) {
+        const bytes = Buffer.from(fs.readFileSync(path.join(base, f.path), "utf8").replace(/\r\n/g, "\n"), "utf8");
+        expect(SKILL_TEXT[dirName][f.path], `${dirName}/${f.path}`).toBe(bytes.toString("utf8"));
+        expect(f.size, `${dirName}/${f.path}`).toBe(bytes.length);
+        expect(f.sha256, `${dirName}/${f.path}`).toBe(crypto.createHash("sha256").update(bytes).digest("hex"));
+      }
     }
   });
 
