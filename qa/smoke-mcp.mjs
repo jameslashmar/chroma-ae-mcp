@@ -253,17 +253,28 @@ const FONT_WARNING_RE = /BIB Error|cannot access font/i;
 /** AE's font warnings that are open now, answered with OK. Only these: any other popup is left to the step that caused it. */
 async function answerFontWarnings() {
   const d = await call("ae_dialogs", {});
-  const out = { answered: 0, open: 0, texts: [] };
+  const out = { answered: 0, open: 0, notOurs: 0, texts: [] };
   for (const x of d.dialogs ?? []) {
     const text = `${x.title ?? ""} ${x.text ?? ""}`;
     if (!FONT_WARNING_RE.test(text)) continue;
     out.open++;
     if (out.texts.length < 2) out.texts.push(text.replace(/\s+/g, " ").trim().slice(0, 120));
-    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK" });
+    // AE raises the same warnings again when Windows fonts change while it is open (Jay, PRISM, 2026-11-28). Those
+    // came from no call of ours (caused_by_op null), and ae_dialog_respond rightly refuses them without the user's
+    // instruction: they are counted apart and left for the user, not tried and reported as a failed answer.
+    if (x.caused_by_op === null) {
+      out.notOurs++;
+      continue;
+    }
+    // `reason` is required by ae_dialog_respond: without it every answer was refused (invalid_args), so a PC that shows these warnings kept them open.
+    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK", reason: "smoke test: AE's font warning (Unknown BIB Error) during the ae_fonts scan; OK lets AE carry on" });
     if (!refused(r)) out.answered++;
   }
   return out;
 }
+
+/** The note for font warnings AE raised on its own, left for the user (empty when there were none). */
+const notOursNote = (n) => (n > 0 ? `; ${n} font warning(s) AE raised on its own (no call of ours: caused_by_op null, as after a Windows font change while AE is open), left for the user to press OK in AE, as ae_dialog_respond refuses them without the user's instruction` : "");
 
 /** ae_fonts with AE's font warnings answered while the scan runs and for a few quiet seconds after it. */
 async function fontSearchAnsweringWarnings(args) {
@@ -294,7 +305,8 @@ async function fontSearchAnsweringWarnings(args) {
   }
   const last = await answerFontWarnings();
   answered += last.answered;
-  return { result: await pending, answered, leftOpen: last.open - last.answered, texts, seconds: Math.round((Date.now() - started) / 1000) };
+  // Warnings of our own that stayed open are a failure; AE's own ones are reported apart (notOurs).
+  return { result: await pending, answered, leftOpen: last.open - last.answered - last.notOurs, notOurs: last.notOurs, texts, seconds: Math.round((Date.now() - started) / 1000) };
 }
 
 async function main() {
@@ -330,7 +342,7 @@ async function main() {
     check(
       "ae_fonts (warm-up: the whole font list is scanned; AE's font warnings are answered)",
       w.available === false || (w.available === true && w.scan_truncated === false && w.total_matches === 0 && warm.leftOpen === 0),
-      `${w.scanned ?? 0} fonts in ${w.scan_calls ?? "?"} call(s), ${warm.seconds} s; ${warm.answered} warning(s) answered, ${warm.leftOpen} left open${warm.texts.length ? `: ${warm.texts.join(" | ").slice(0, 160)}` : ""}${w.available === false ? `; ${w.reason}` : ""}`
+      `${w.scanned ?? 0} fonts in ${w.scan_calls ?? "?"} call(s), ${warm.seconds} s; ${warm.answered} warning(s) answered, ${warm.leftOpen} left open${warm.texts.length ? `: ${warm.texts.join(" | ").slice(0, 160)}` : ""}${notOursNote(warm.notOurs)}${w.available === false ? `; ${w.reason}` : ""}`
     );
   }
 
@@ -2252,7 +2264,7 @@ async function main() {
       check(
         "ae_fonts (check_files: every font file on disk)",
         x.available === false || (x.available === true && x.fonts > 0 && Array.isArray(x.problems) && x.scan_truncated === false && fc.leftOpen === 0),
-        `${x.fonts} fonts, ${x.files} files, ${x.problem_fonts} problem(s) ${JSON.stringify(x.problem_counts)}${(x.problems ?? []).length ? ": " + x.problems.slice(0, 3).map((p) => `${p.postscript} ${p.problem}`).join(", ") : ""}, ${x.without_file?.count ?? 0} without a file, ${x.seconds} s; ${fc.answered} warning(s) answered${x.available === false ? "; " + x.reason : ""}`
+        `${x.fonts} fonts, ${x.files} files, ${x.problem_fonts} problem(s) ${JSON.stringify(x.problem_counts)}${(x.problems ?? []).length ? ": " + x.problems.slice(0, 3).map((p) => `${p.postscript} ${p.problem}`).join(", ") : ""}, ${x.without_file?.count ?? 0} without a file, ${x.seconds} s; ${fc.answered} warning(s) answered${notOursNote(fc.notOurs)}${x.available === false ? "; " + x.reason : ""}`
       );
     }
     r = await call("ae_fonts", { action: "search", query: "arial", page_size: 5 });
