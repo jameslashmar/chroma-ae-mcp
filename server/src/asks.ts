@@ -26,6 +26,10 @@ export interface AskQuestion {
   multi_select: boolean;
   allow_other: boolean;
   context?: string;
+  /** "popup": After Effects is asking (popups.ts); the panel titles it so and shows the popup's screenshot. */
+  source?: "popup";
+  /** Absolute path of a PNG shown with the question itself (a popup's screenshot). */
+  image_path?: string;
   asked_at: number;
 }
 

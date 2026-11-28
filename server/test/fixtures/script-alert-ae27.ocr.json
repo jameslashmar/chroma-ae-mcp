@@ -1,0 +1,117 @@
+{
+ "ocr_lines": [
+  {
+   "text": "Script Alert",
+   "words": [
+    {
+     "y": 10,
+     "w": 30,
+     "h": 12,
+     "text": "Script",
+     "x": 17
+    },
+    {
+     "y": 11,
+     "w": 25,
+     "h": 9,
+     "text": "Alert",
+     "x": 50
+    }
+   ]
+  },
+  {
+   "text": "Chroma popup watcher test: the font Inter-Bold is missing.",
+   "words": [
+    {
+     "y": 66,
+     "w": 39,
+     "h": 9,
+     "text": "Chroma",
+     "x": 70
+    },
+    {
+     "y": 68,
+     "w": 34,
+     "h": 9,
+     "text": "popup",
+     "x": 113
+    },
+    {
+     "y": 66,
+     "w": 41,
+     "h": 9,
+     "text": "watcher",
+     "x": 151
+    },
+    {
+     "y": 66,
+     "w": 22,
+     "h": 9,
+     "text": "test:",
+     "x": 194
+    },
+    {
+     "y": 66,
+     "w": 17,
+     "h": 9,
+     "text": "the",
+     "x": 219
+    },
+    {
+     "y": 66,
+     "w": 22,
+     "h": 9,
+     "text": "font",
+     "x": 239
+    },
+    {
+     "y": 66,
+     "w": 51,
+     "h": 9,
+     "text": "Inter-Bold",
+     "x": 265
+    },
+    {
+     "y": 66,
+     "w": 7,
+     "h": 9,
+     "text": "is",
+     "x": 320
+    },
+    {
+     "y": 66,
+     "w": 41,
+     "h": 11,
+     "text": "missing.",
+     "x": 331
+    }
+   ]
+  },
+  {
+   "text": "0K",
+   "words": [
+    {
+     "y": 126,
+     "w": 15,
+     "h": 9,
+     "text": "0K",
+     "x": 343
+    }
+   ]
+  },
+  {
+   "text": "x",
+   "words": [
+    {
+     "y": 10,
+     "w": 10,
+     "h": 10,
+     "text": "x",
+     "x": 383
+    }
+   ]
+  }
+ ],
+ "width": 411,
+ "height": 159
+}

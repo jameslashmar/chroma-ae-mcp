@@ -101,6 +101,16 @@ export function currentCall(): CallState | undefined {
   return storage.getStore();
 }
 
+/**
+ * A running call whose client takes questions on its stream (elicitation), the most recent one; null when
+ * none. The popup watcher asks there while a call waits on a popup.
+ */
+export function clientRequestChannel(): NonNullable<CallState["request"]> | null {
+  let found: NonNullable<CallState["request"]> | null = null;
+  for (const s of running.values()) if (s.request && !s.cancelled) found = s.request;
+  return found;
+}
+
 /** notifications/cancelled: marks the running call with that id from the same client. False when none is running. */
 export function cancelCall(client: string, requestId: unknown, reason?: unknown): boolean {
   if (typeof requestId !== "string" && typeof requestId !== "number") return false;

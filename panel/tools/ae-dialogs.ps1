@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("list", "respond", "screenshot-main")]
+    [ValidateSet("list", "respond", "screenshot-main", "watch")]
     [string]$Mode,
 
     [int]$AePid = 0,
@@ -24,7 +24,13 @@ param(
     [switch]$ExpectEmptyTitle,
 
     # respond with -Key: refuse (dialog_changed) when the window rect is no longer "left,top,right,bottom".
-    [string]$ExpectRect = ""
+    [string]$ExpectRect = "",
+
+    # watch: exit when this process (the panel service's Node) is gone.
+    [int]$ParentPid = 0,
+
+    # watch: how often AE's windows are looked at.
+    [int]$IntervalMs = 1000
 )
 
 $ErrorActionPreference = "Stop"
@@ -87,6 +93,15 @@ public static class ChromaWin32 {
 
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    public static string ClassOf(IntPtr hWnd) {
+        System.Text.StringBuilder sb = new System.Text.StringBuilder(256);
+        GetClassName(hWnd, sb, 256);
+        return sb.ToString();
+    }
 
     public const uint GW_OWNER = 4;
     public const uint PW_RENDERFULLCONTENT = 2;
@@ -230,6 +245,49 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
     }
 }
+    # ---------- watch ----------
+    # A long-running, cheap look at AE's top-level windows (Win32 only: no UI Automation, no screenshot, no
+    # OCR). One JSON line whenever the set of candidate popup windows changes; the server then runs a full
+    # list. AE's main window, its floating panel frames (DroverLord), tooltips, menus and shadows are never
+    # popups. Exits when the parent (the panel service's Node) is gone, or when nobody reads its output any
+    # more (a reloaded service page): a line every 10 s finds that out, since writing to a closed pipe fails.
+    if ($Mode -eq "watch") {
+        $interval = [Math]::Max(250, $IntervalMs)
+        $skip = @("tooltips_class32", "#32768", "SysShadow", "IME", "MSCTFIME UI")
+        $last = $null
+        $aePids = @()
+        $pidCheckedAt = [DateTime]::MinValue
+        $aliveAt = Get-Date
+        try { Write-JsonOut @{ ok = $true; event = "ready" } } catch { exit 0 }
+        while ($true) {
+            if ($ParentPid -gt 0 -and $null -eq (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit 0 }
+            if (((Get-Date) - $pidCheckedAt).TotalSeconds -ge 5) {
+                $aePids = @(Get-Process -Name "AfterFX" -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.Id })
+                $pidCheckedAt = Get-Date
+            }
+            $found = New-Object 'System.Collections.Generic.List[long]'
+            foreach ($tPid in $aePids) {
+                foreach ($h in [ChromaWin32]::GetProcessTopWindows($tPid)) {
+                    $cls = [ChromaWin32]::ClassOf($h)
+                    if ($cls -like "DroverLord*" -or $cls -like "AE_CApplication_*" -or $skip -contains $cls) { continue }
+                    $found.Add($h.ToInt64())
+                }
+            }
+            $key = (@($found) | Sort-Object) -join ","
+            try {
+                if ($key -ne $last) {
+                    $last = $key
+                    Write-JsonOut @{ ok = $true; event = "windows"; handles = @($found) }
+                    $aliveAt = Get-Date
+                } elseif (((Get-Date) - $aliveAt).TotalSeconds -ge 10) {
+                    Write-JsonOut @{ ok = $true; event = "alive" }
+                    $aliveAt = Get-Date
+                }
+            } catch { exit 0 }
+            Start-Sleep -Milliseconds $interval
+        }
+    }
+
     if ($Mode -eq "list") {
         $targetPids = @()
         if ($AePid -gt 0) {

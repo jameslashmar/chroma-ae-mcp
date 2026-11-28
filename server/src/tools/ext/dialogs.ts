@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
@@ -899,6 +899,101 @@ async function listDialogsInternal(opts: {
 }
 
 /**
+ * Records `dialogs` as what was shown (to the agent by ae_dialogs, or to the user by the popup watcher):
+ * ae_dialog_respond compares its fresh read of an AE-painted dialog with this before it posts a key.
+ */
+export function markShown(dialogs: EnrichedDialog[]): void {
+  for (const d of dialogs) {
+    const m = seenDialogs.get(d.handle);
+    if (m) {
+      m.shown = {
+        title: d.title,
+        text: d.text,
+        buttons: d.buttons.map((b) => b.name).join("|"),
+        default_button: d.default_button ?? null,
+        rect: d.window_rect ?? "",
+        painted: d.unattended !== undefined,
+      };
+    }
+  }
+}
+
+/** The full list for the popup watcher (with screenshots, so the user can be shown the popup). */
+export function listDialogsForWatcher(): ReturnType<typeof listDialogsInternal> {
+  return listDialogsInternal({ screenshots: true });
+}
+
+/** Whether this OS can list After Effects popups (Windows, macOS). */
+export function popupsSupported(): boolean {
+  return dialogsSupported();
+}
+
+export interface DialogWatch {
+  stop(): void;
+}
+
+/** How often the watch looks at AE's windows (Windows) or lists the popups (macOS, where a list is the only look). */
+export const WATCH_INTERVAL_MS = 1000;
+export const MAC_WATCH_INTERVAL_MS = 4000;
+const WATCH_RESTART_MS = 5000;
+
+/**
+ * Calls `onChange` when After Effects' popup windows may have changed. Windows: one long-running
+ * `ae-dialogs.ps1 -Mode watch` (Win32 window enumeration only, a JSON line per change; restarted if it
+ * exits). macOS: a timer, since a look there is a full list (System Events). Null when this OS has no
+ * popup reading or the script is missing.
+ */
+export function startDialogWatch(onChange: () => void, log?: (level: string, msg: string) => void): DialogWatch | null {
+  if (!dialogsSupported()) return null;
+  if (currentPlatform() === "darwin") {
+    const timer = setInterval(onChange, MAC_WATCH_INTERVAL_MS);
+    return { stop: () => clearInterval(timer) };
+  }
+  const scriptPath = locateDialogsPs1Script();
+  if (!scriptPath) return null;
+  let stopped = false;
+  let child: ReturnType<typeof spawn> | null = null;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+  const launch = (): void => {
+    if (stopped) return;
+    const c = spawn(
+      powershellExe(),
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Mode", "watch", "-ParentPid", String(process.pid), "-IntervalMs", String(WATCH_INTERVAL_MS)],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    child = c;
+    let buf = "";
+    c.stdout?.setEncoding("utf8");
+    c.stdout?.on("data", (chunk: string) => {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line.includes('"windows"')) onChange();
+      }
+    });
+    c.on("error", (err) => log?.("warn", `Popup watch could not start: ${err.message}`));
+    c.on("exit", () => {
+      child = null;
+      if (!stopped) restartTimer = setTimeout(launch, WATCH_RESTART_MS);
+    });
+  };
+  launch();
+  return {
+    stop: () => {
+      stopped = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      try {
+        child?.kill();
+      } catch {
+        // already gone
+      }
+    },
+  };
+}
+
+/**
  * Open dialogs without swallowing a failure: `ok: false` means the list could
  * not be read, which a caller must not take as "no dialog". Never throws.
  */
@@ -1047,6 +1142,207 @@ export function decidePaintedKey(buttons: DialogButton[], want: string): Painted
 
 const RESULT_TEXT_CHARS = 500;
 
+/**
+ * ae_dialog_respond without the tool around it: the popup watcher (popups.ts) answers through the same
+ * checks (policy, fresh read, painted-dialog key, destructive gate) and the same log.
+ */
+export async function respondToDialog(args: z.infer<typeof AeDialogRespondSchema>): Promise<Record<string, unknown>> {
+  if (!dialogsSupported()) {
+    return {
+      ok: false,
+      error: "not_implemented_on_this_os",
+    };
+  }
+
+  let meta = seenDialogs.get(args.handle);
+  if (!meta) {
+    await listDialogsInternal({ screenshots: false });
+    meta = seenDialogs.get(args.handle);
+  }
+  // Windows: a handle that is not an open AE dialog is never answered (not even through UI Automation).
+  if (!meta && currentPlatform() !== "darwin") {
+    return { ok: false, error: "dialog_gone", message: `"${args.button}" was NOT pressed: no open After Effects dialog has this handle.`, handle: args.handle, button: args.button };
+  }
+
+  const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
+  const policy = evaluateRespondPolicy({
+    button: args.button,
+    caused_by_op: causedByOp,
+    allow_destructive: args.allow_destructive ?? false,
+    user_instruction: args.user_instruction,
+  });
+
+  if (!policy.allowed) {
+    return {
+      ok: false,
+      error: policy.error ?? "refused_by_policy",
+      message: policy.message,
+      handle: args.handle,
+      button: args.button,
+      caused_by_op: causedByOp,
+    };
+  }
+
+  // A dialog with real buttons (UI Automation, or macOS): OK / Yes / Continue on text about replacing or losing something needs
+  // both destructive flags, as on a painted dialog (which has its own gate below, after the fresh read). A lone OK is harmless.
+  if (!(meta?.painted || meta?.shown?.painted)) {
+    const buttonCount = meta?.buttons ? meta.buttons.split("|").length : 0;
+    if (
+      buttonCount > 1 &&
+      OK_LIKE.test(psLabel(args.button)) &&
+      DESTRUCTIVE_BODY_PATTERN.test(meta?.text ?? "") &&
+      !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)
+    ) {
+      return {
+        ok: false,
+        error: "refused_destructive_dialog",
+        message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
+        handle: args.handle,
+        button: args.button,
+      };
+    }
+  }
+  let parsed: Ps1RespondOutput | Record<string, unknown>;
+  let shown: EnrichedDialog | null = null;
+  if (currentPlatform() === "darwin") {
+    // The title and the start of the text guard against another window having taken this index.
+    const rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
+    parsed = parsePs1JsonOutput<Ps1RespondOutput>(rawStdout);
+  } else {
+    const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
+    let early: Record<string, unknown> | null = null;
+    const refuse = (error: string, message: string, extra: Record<string, unknown> = {}) => {
+      early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra };
+    };
+    if (meta?.painted || meta?.shown?.painted) {
+      // AE painted this dialog. Compare with what ae_dialogs showed the agent (title, text, buttons, default,
+      // rect), after a fresh read (screenshot, OCR, button row, default) right before the key.
+      const seen = meta.shown;
+      if (!seen) {
+        refuse("dialog_not_listed", "ae_dialogs has not shown this dialog yet. Call ae_dialogs, read it, then answer.");
+      } else {
+        const fresh = await listDialogsInternal({ screenshots: true });
+        if (!fresh.ok) {
+          early = { ok: false, error: fresh.error, handle: args.handle, button: args.button };
+        } else {
+          const d = fresh.dialogs.find((x) => x.handle === args.handle);
+          if (!d) {
+            early = { ok: false, error: "dialog_gone", handle: args.handle, button: args.button };
+          } else if (d.unattended === undefined) {
+            refuse("dialog_changed", "this window is no longer an AE-painted dialog the way ae_dialogs showed it. List the dialogs again.");
+          } else {
+            shown = d;
+            const cancelOnly = psLabel(args.button) === "cancel";
+            const sameText = textKey(d.text, cancelOnly) === textKey(seen.text, cancelOnly);
+            if (
+              d.title !== seen.title ||
+              !sameText ||
+              d.buttons.map((b) => b.name).join("|") !== seen.buttons ||
+              (d.default_button ?? null) !== seen.default_button ||
+              (d.window_rect ?? "") !== seen.rect
+            ) {
+              refuse("dialog_changed", "this dialog is not the one ae_dialogs showed (its title, text, buttons, default button or position differ now). List the dialogs again.");
+            } else if (fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle) {
+              refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+            } else {
+              const decision = decidePaintedKey(d.buttons, args.button);
+              if (decision.action === "refuse") {
+                early = {
+                  ok: false,
+                  error: decision.error,
+                  message: decision.message,
+                  handle: args.handle,
+                  button: args.button,
+                  ocr_buttons: d.buttons.map((b) => b.name),
+                  default_button: d.default_button ?? null,
+                  ...(d.unattended ? { unattended: d.unattended } : {}),
+                };
+              } else if (args.check) {
+                refuse("checkbox_not_found", "an AE-painted dialog has no checkbox that can be toggled without focusing AE.");
+              } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
+                refuse(
+                  "refused_destructive_dialog",
+                  `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
+                );
+              } else {
+                // A key posted to the dialog's own window; AE keeps its focus state. A focus-taking
+                // fallback (SendKeys) is NOT built: see ae-dialogs.ps1. If the dialog does not close,
+                // the result says closed:false and the caller asks the user.
+                psArgs.push("-Key", decision.action);
+                if (d.title === "") psArgs.push("-ExpectEmptyTitle");
+                else psArgs.push("-ExpectTitle", d.title);
+                if (d.window_rect) psArgs.push("-ExpectRect", d.window_rect);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // A dialog with real (UI Automation) buttons: the same two guards as the painted path. Only the topmost
+      // dialog is answered (the list is topmost first); the script refuses a window that is not enabled.
+      const fresh = await listDialogsInternal({ screenshots: false });
+      if (fresh.ok && fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle && fresh.dialogs.some((x) => x.handle === args.handle)) {
+        refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+      } else if (args.check) {
+        psArgs.push("-Check", args.check);
+      }
+    }
+    parsed = early ?? parsePs1JsonOutput<Ps1RespondOutput>(await runPowerShellScript(psArgs));
+  }
+
+  const logTime = currentNowIso();
+  const title = shown?.title ?? meta?.title ?? "";
+  const textExcerpt = (shown?.text ?? meta?.text ?? "").slice(0, RESULT_TEXT_CHARS);
+
+  appendResponseLog({
+    time: logTime,
+    handle: args.handle,
+    title,
+    text_excerpt: textExcerpt,
+    button: args.button,
+    check: args.check,
+    reason: args.reason,
+    op: causedByOp,
+    allow_destructive: Boolean(args.allow_destructive),
+    user_instruction: args.user_instruction,
+    result: parsed,
+  });
+
+  const res = parsed as { ok?: boolean; error?: string; closed?: boolean; message?: string; method?: string; pressed?: string; ocr_buttons?: unknown };
+  const ok = res.ok === true;
+  const closed = res.closed === true;
+  if (ok && closed) {
+    seenDialogs.delete(args.handle);
+  }
+
+  if (!ok && res.error === "button_not_answerable" && !res.message) {
+    // Say plainly what the AE-painted dialog allows, instead of leaving the caller to guess.
+    const ocr = res.ocr_buttons;
+    const names = Array.isArray(ocr) ? ocr.filter((n): n is string => typeof n === "string").map(normalizeOcrLabel) : [];
+    const fixed: DialogButton[] = names.map((n) => ({ name: n, automationId: "", enabled: true }));
+    const un = fixed.length > 0 ? unattendedAnswers(fixed) : undefined;
+    const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
+    return { ...parsed, ocr_buttons: names, ...(un ? { unattended: un } : {}), message: `"${args.button}" was NOT pressed. ${why}` };
+  }
+
+  if (ok && shown && res.method) {
+    const said = shown.text.slice(0, RESULT_TEXT_CHARS);
+    const pressed = res.pressed ?? args.button;
+    const message = closed
+      ? `Pressed "${pressed}" (${res.method}) on the AE dialog "${shown.title}". It said: ${said} Tell the user what it said.`
+      : `Sent the key (${res.method}) for "${pressed}" but the dialog "${shown.title}" did not close within 3 s. Nothing else was tried: ask the user. It said: ${said}`;
+    return {
+      ...parsed,
+      dialog: { title: shown.title, text: said },
+      default_button: shown.default_button ?? null,
+      message,
+    };
+  }
+
+  return parsed;
+}
+
+
 export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
@@ -1066,23 +1362,9 @@ export const dialogsTools: ToolDefinition<any>[] = [
 
       const screenshots = args.screenshots ?? true;
       const res = await listDialogsInternal({ screenshots });
-      if (res.ok) {
-        // What the agent is shown is the baseline ae_dialog_respond compares with. Only this handler sets it:
-        // a background list (timeout diagnostics, other tools) must not move it.
-        for (const d of res.dialogs) {
-          const m = seenDialogs.get(d.handle);
-          if (m) {
-            m.shown = {
-              title: d.title,
-              text: d.text,
-              buttons: d.buttons.map((b) => b.name).join("|"),
-              default_button: d.default_button ?? null,
-              rect: d.window_rect ?? "",
-              painted: d.unattended !== undefined,
-            };
-          }
-        }
-      }
+      // What the agent is shown is the baseline ae_dialog_respond compares with. Only this handler and the
+      // popup watcher (which shows the popup to the user) set it: a background list must not move it.
+      if (res.ok) markShown(res.dialogs);
       return res;
     },
   },
@@ -1094,200 +1376,12 @@ export const dialogsTools: ToolDefinition<any>[] = [
       " " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeDialogRespondSchema,
-    handler: async (args) => {
-      if (!dialogsSupported()) {
-        return {
-          ok: false,
-          error: "not_implemented_on_this_os",
-        };
-      }
-
-      let meta = seenDialogs.get(args.handle);
-      if (!meta) {
-        await listDialogsInternal({ screenshots: false });
-        meta = seenDialogs.get(args.handle);
-      }
-      // Windows: a handle that is not an open AE dialog is never answered (not even through UI Automation).
-      if (!meta && currentPlatform() !== "darwin") {
-        return { ok: false, error: "dialog_gone", message: `"${args.button}" was NOT pressed: no open After Effects dialog has this handle.`, handle: args.handle, button: args.button };
-      }
-
-      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
-      const policy = evaluateRespondPolicy({
-        button: args.button,
-        caused_by_op: causedByOp,
-        allow_destructive: args.allow_destructive ?? false,
-        user_instruction: args.user_instruction,
-      });
-
-      if (!policy.allowed) {
-        return {
-          ok: false,
-          error: policy.error ?? "refused_by_policy",
-          message: policy.message,
-          handle: args.handle,
-          button: args.button,
-          caused_by_op: causedByOp,
-        };
-      }
-
-      // A dialog with real buttons (UI Automation, or macOS): OK / Yes / Continue on text about replacing or losing something needs
-      // both destructive flags, as on a painted dialog (which has its own gate below, after the fresh read). A lone OK is harmless.
-      if (!(meta?.painted || meta?.shown?.painted)) {
-        const buttonCount = meta?.buttons ? meta.buttons.split("|").length : 0;
-        if (
-          buttonCount > 1 &&
-          OK_LIKE.test(psLabel(args.button)) &&
-          DESTRUCTIVE_BODY_PATTERN.test(meta?.text ?? "") &&
-          !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)
-        ) {
-          return {
-            ok: false,
-            error: "refused_destructive_dialog",
-            message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
-            handle: args.handle,
-            button: args.button,
-          };
-        }
-      }
-      let parsed: Ps1RespondOutput | Record<string, unknown>;
-      let shown: EnrichedDialog | null = null;
-      if (currentPlatform() === "darwin") {
-        // The title and the start of the text guard against another window having taken this index.
-        const rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
-        parsed = parsePs1JsonOutput<Ps1RespondOutput>(rawStdout);
-      } else {
-        const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
-        let early: Record<string, unknown> | null = null;
-        const refuse = (error: string, message: string, extra: Record<string, unknown> = {}) => {
-          early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra };
-        };
-        if (meta?.painted || meta?.shown?.painted) {
-          // AE painted this dialog. Compare with what ae_dialogs showed the agent (title, text, buttons, default,
-          // rect), after a fresh read (screenshot, OCR, button row, default) right before the key.
-          const seen = meta.shown;
-          if (!seen) {
-            refuse("dialog_not_listed", "ae_dialogs has not shown this dialog yet. Call ae_dialogs, read it, then answer.");
-          } else {
-            const fresh = await listDialogsInternal({ screenshots: true });
-            if (!fresh.ok) {
-              early = { ok: false, error: fresh.error, handle: args.handle, button: args.button };
-            } else {
-              const d = fresh.dialogs.find((x) => x.handle === args.handle);
-              if (!d) {
-                early = { ok: false, error: "dialog_gone", handle: args.handle, button: args.button };
-              } else if (d.unattended === undefined) {
-                refuse("dialog_changed", "this window is no longer an AE-painted dialog the way ae_dialogs showed it. List the dialogs again.");
-              } else {
-                shown = d;
-                const cancelOnly = psLabel(args.button) === "cancel";
-                const sameText = textKey(d.text, cancelOnly) === textKey(seen.text, cancelOnly);
-                if (
-                  d.title !== seen.title ||
-                  !sameText ||
-                  d.buttons.map((b) => b.name).join("|") !== seen.buttons ||
-                  (d.default_button ?? null) !== seen.default_button ||
-                  (d.window_rect ?? "") !== seen.rect
-                ) {
-                  refuse("dialog_changed", "this dialog is not the one ae_dialogs showed (its title, text, buttons, default button or position differ now). List the dialogs again.");
-                } else if (fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle) {
-                  refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
-                } else {
-                  const decision = decidePaintedKey(d.buttons, args.button);
-                  if (decision.action === "refuse") {
-                    early = {
-                      ok: false,
-                      error: decision.error,
-                      message: decision.message,
-                      handle: args.handle,
-                      button: args.button,
-                      ocr_buttons: d.buttons.map((b) => b.name),
-                      default_button: d.default_button ?? null,
-                      ...(d.unattended ? { unattended: d.unattended } : {}),
-                    };
-                  } else if (args.check) {
-                    refuse("checkbox_not_found", "an AE-painted dialog has no checkbox that can be toggled without focusing AE.");
-                  } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
-                    refuse(
-                      "refused_destructive_dialog",
-                      `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
-                    );
-                  } else {
-                    // A key posted to the dialog's own window; AE keeps its focus state. A focus-taking
-                    // fallback (SendKeys) is NOT built: see ae-dialogs.ps1. If the dialog does not close,
-                    // the result says closed:false and the caller asks the user.
-                    psArgs.push("-Key", decision.action);
-                    if (d.title === "") psArgs.push("-ExpectEmptyTitle");
-                    else psArgs.push("-ExpectTitle", d.title);
-                    if (d.window_rect) psArgs.push("-ExpectRect", d.window_rect);
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          // A dialog with real (UI Automation) buttons: the same two guards as the painted path. Only the topmost
-          // dialog is answered (the list is topmost first); the script refuses a window that is not enabled.
-          const fresh = await listDialogsInternal({ screenshots: false });
-          if (fresh.ok && fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle && fresh.dialogs.some((x) => x.handle === args.handle)) {
-            refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
-          } else if (args.check) {
-            psArgs.push("-Check", args.check);
-          }
-        }
-        parsed = early ?? parsePs1JsonOutput<Ps1RespondOutput>(await runPowerShellScript(psArgs));
-      }
-
-      const logTime = currentNowIso();
-      const title = shown?.title ?? meta?.title ?? "";
-      const textExcerpt = (shown?.text ?? meta?.text ?? "").slice(0, RESULT_TEXT_CHARS);
-
-      appendResponseLog({
-        time: logTime,
-        handle: args.handle,
-        title,
-        text_excerpt: textExcerpt,
-        button: args.button,
-        check: args.check,
-        reason: args.reason,
-        op: causedByOp,
-        allow_destructive: Boolean(args.allow_destructive),
-        user_instruction: args.user_instruction,
-        result: parsed,
-      });
-
-      const res = parsed as { ok?: boolean; error?: string; closed?: boolean; message?: string; method?: string; pressed?: string; ocr_buttons?: unknown };
-      const ok = res.ok === true;
-      const closed = res.closed === true;
-      if (ok && closed) {
-        seenDialogs.delete(args.handle);
-      }
-
-      if (!ok && res.error === "button_not_answerable" && !res.message) {
-        // Say plainly what the AE-painted dialog allows, instead of leaving the caller to guess.
-        const ocr = res.ocr_buttons;
-        const names = Array.isArray(ocr) ? ocr.filter((n): n is string => typeof n === "string").map(normalizeOcrLabel) : [];
-        const fixed: DialogButton[] = names.map((n) => ({ name: n, automationId: "", enabled: true }));
-        const un = fixed.length > 0 ? unattendedAnswers(fixed) : undefined;
-        const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
-        return { ...parsed, ocr_buttons: names, ...(un ? { unattended: un } : {}), message: `"${args.button}" was NOT pressed. ${why}` };
-      }
-
-      if (ok && shown && res.method) {
-        const said = shown.text.slice(0, RESULT_TEXT_CHARS);
-        const pressed = res.pressed ?? args.button;
-        const message = closed
-          ? `Pressed "${pressed}" (${res.method}) on the AE dialog "${shown.title}". It said: ${said} Tell the user what it said.`
-          : `Sent the key (${res.method}) for "${pressed}" but the dialog "${shown.title}" did not close within 3 s. Nothing else was tried: ask the user. It said: ${said}`;
-        return {
-          ...parsed,
-          dialog: { title: shown.title, text: said },
-          default_button: shown.default_button ?? null,
-          message,
-        };
-      }
-
-      return parsed;
+    handler: async (args, ctx) => {
+      const out = await respondToDialog(args);
+      const res = out as { ok?: boolean; closed?: boolean; pressed?: string };
+      // The popup watcher reports this popup as answered by the agent, not as closed in After Effects.
+      if (res.ok === true && res.closed === true) ctx.popups?.noteAnswered(args.handle, res.pressed ?? args.button, "agent");
+      return out;
     },
   },
 ];

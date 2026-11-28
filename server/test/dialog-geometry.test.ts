@@ -1,3 +1,7 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as url from "node:url";
+import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 import {
   analysePaintedDialog,
@@ -328,5 +332,24 @@ describe("layouts measured on real dialogs (synthetic reproductions)", () => {
     const res = analysePaintedDialog(lines, png);
     expect(res.buttons.map((b) => b.name)).toEqual(["Save", "Don't Save", "Cancel"]);
     expect(res.default_index).toBe(0);
+  });
+});
+
+describe("a light Windows message box (AE 27.0 Script Alert, measured)", () => {
+  const dir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures");
+  const shot = PNG.sync.read(fs.readFileSync(path.join(dir, "script-alert-ae27.png")));
+  const png: PngPixels = { width: shot.width, height: shot.height, data: shot.data };
+  const ocr = JSON.parse(fs.readFileSync(path.join(dir, "script-alert-ae27.ocr.json"), "utf8")) as { ocr_lines: OcrLine[] };
+
+  it("reads its wide OK button (the grey band under the white body), as the lone default", () => {
+    const res = analysePaintedDialog(ocr.ocr_lines, png);
+    expect(res.buttons.map((b) => b.name)).toEqual(["0K"]);
+    expect(res.default_source).toBe("only_button");
+    expect(res.body_text).toContain("Inter-Bold is missing");
+  });
+
+  it("does not reach that far without the band (a dark dialog keeps the narrow search)", () => {
+    const dark = { ...png, data: Uint8Array.from(png.data, (v, i) => (i % 4 === 3 ? v : 255 - v)) };
+    expect(analysePaintedDialog(ocr.ocr_lines, dark).buttons).toEqual([]);
   });
 });

@@ -507,6 +507,7 @@ export function coreInstructions(): string {
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
     "Start a new task with ae_plan (the request, its intent, the layers it names): the plan, and whether to ask the user first or go ahead with stated assumptions.",
+    "A result can carry `popups`: what After Effects' popups said and what was pressed (or that one waits for the user). Tell the user in a line, and follow its `next`.",
     "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",

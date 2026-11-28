@@ -19,4 +19,10 @@ How the MCP keeps a live After Effects session safe while a person is editing in
   - `ae_dialogs` reads AE's modal popups (title, text, buttons, screenshot) from outside AE's scripting thread, with OCR for the dialogs AE paints itself.
   - A timeout names any popup that is blocking AE.
   - `ae_dialog_respond` answers only popups our own operation caused, and refuses Save, Don't Save, Replace, Delete or Discard without an explicit instruction from the user. Every answer is logged.
+  - The panel service watches for popups as they appear (`server/src/popups.ts`).
+    - A popup our own operation raised with one OK-like button is pressed at once, so the operation goes on. There is nothing to decide.
+    - Every other popup is asked about: in the panel ("After Effects asks", with its screenshot and its buttons as the options), and in the client too when it takes questions. The user's pick is pressed through `ae_dialog_respond`'s checks, quoting the pick as the user's instruction.
+    - Buttons that cannot be pressed without focusing AE are named, not offered: the user clicks those in AE.
+    - Progress windows (only Cancel / Stop, or no button while our operation runs) are left alone.
+    - Whatever happened is reported once on the agent's next tool result (`popups`): what the popup said, what was pressed and by whom, or that it closed in AE. The agent tells the user. For a missing font it offers `ae_fonts check_files`; for missing files, `ae_collect_relink`.
 - **Locked-down bridge.** It binds to localhost only. Every request needs the Bearer token, stored in a folder only the current user can read. Any request with an `Origin` header (from a browser) is rejected, and the `Host` header is checked strictly.
