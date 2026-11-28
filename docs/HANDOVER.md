@@ -1,5 +1,14 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## Keeping a hand over a replaced screen, 2026-11-28 (`feat/planar-real-footage`)
+
+- **Why.** On the HCW laptop task the hand in front of the new screen was keyed with `ae_key_greenscreen`'s defaults: Emre saw the insert through the hand, a sliding halo round the fingers, spill and no screen light on the fingertip. Measured (docs/CALIBRATION.md, last section): the skin's matte was 0.86-0.92, 7-12% of the old screen stayed, Key Cleaner made a 10 px half-transparent ring, the spill suppressor moved skin with no spill on it, and the insert had no motion blur on a screen moving 5.5 px a frame.
+- **New tool `ae_screen_foreground`** (`screenfg.ts`, `screenfg-math.ts`, `panel/host/ext/screenfg.jsx`; family `ae_screen` action `foreground`). After `ae_screen_replace` it builds '<name> KEY' (a precomp of a duplicate of the plate with Keylight, Replace Method Source), matted by '<name> AREA' (the insert duplicated, precomposed, grown by Minimax), and '<name> WRAP' (blur(1 - a) x a) as the luma matte of two copies of the insert: the old screen colour in Subtract and the blurred insert in Add. Three guarded writes: build (Keylight off), Keylight on with the screen colour measured on the plate inside the area, then the clips (raw matte percentiles on pixels the plate says are surely screen or surely foreground) and the wrap (strength and radius fitted on the edge's screen share, brightness aside). Then a check on renders and a crop sheet. Calling again re-tunes the parts; `remove: true` removes them (also the way out when the screen turns out not to be a key colour after the build).
+- **Measured on the laptop:** see-through 0.05%, skin colour shift 0, 88-95% of the old screen in the edge swapped for the new screen's colour, 16-18 s a call.
+- **Motion blur.** CC Force Motion Blur's own default phase 0 puts the blur half a shutter ahead of the frame; the track follows the middle of the plate's blur. `ae_screen_replace` `force` and `ae_screen_foreground` now set phase -angle / 2 at the comp's angle; `ae_screen_foreground` adds it to a moving insert that had none (over 1.5 px a frame).
+- **Also fixed:** the before / after sheets of `ae_screen_replace` had blank labels (the label font has capitals only).
+- **Not done:** the screen's light on the subject away from the edge (spill replacement): this plate shows none, so it is only reported. Over a screen showing a picture (not a key colour) a hand still needs a roto.
+
 ## macOS and Windows live checks, 2026-11-22 (`mac/live-fixes-2026-11-22`)
 
 ### Where it is

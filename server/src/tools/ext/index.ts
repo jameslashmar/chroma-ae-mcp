@@ -35,6 +35,7 @@ import { inpaintTools } from "./inpaint.js";
 import { mattesTools } from "./mattes.js";
 import { patchfitTools } from "./patchfit.js";
 import { screenrepTools } from "./screenrep.js";
+import { screenfgTools } from "./screenfg.js";
 import { projectitemsTools } from "./projectitems.js";
 import { projectsettingsTools } from "./projectsettings.js";
 import { viewTools } from "./view.js";
@@ -150,6 +151,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...mattesTools,
   ...patchfitTools,
   ...screenrepTools,
+  ...screenfgTools,
   ...projectitemsTools,
   ...projectsettingsTools,
   ...viewTools,

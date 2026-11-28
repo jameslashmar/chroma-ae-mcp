@@ -764,6 +764,9 @@ function makeEffect(matchName: string, o: FxOpts): FakeGroup {
     (props[3] as any).minValue = o.levelsMin ?? 0;
     return new FakeGroup("Levels", matchName, props);
   }
+  if (matchName === "CC Force Motion Blur") {
+    return new FakeGroup("CC Force Motion Blur", matchName, [P1("Motion Blur Samples", "CC Force Motion Blur-0001", 8), P1("Override Shutter Settings", "CC Force Motion Blur-0002", 1), P1("Shutter Angle", "CC Force Motion Blur-0003", 180), P1("Shutter Phase", "CC Force Motion Blur-0005", 0)]);
+  }
   if (matchName === "ADBE Gaussian Blur 2") {
     if (o.blurParams === false) return new FakeGroup("Gaussian Blur", matchName, []);
     return new FakeGroup("Gaussian Blur", matchName, [P1("Blurriness", "g1", 0), P1("Blur Dimensions", "g2", 1)]);
@@ -994,6 +997,11 @@ describe("screenrep.jsx", () => {
       const r = A.screenrepApply(applyArgs(s, { look: { levels: { in_black: 0.02, in_white: 0.96, out_black: 0.05, out_white: 1 }, blurriness: 3 }, motion_blur: "force" }));
       const ins = s.comp.layer(r.insert_layer.index)!;
       expect(fxNames(ins)).toEqual(["ADBE Pro Levels2", "ADBE Gaussian Blur 2", "CC Power Pin", "CC Force Motion Blur"]);
+      // CC Force Motion Blur is centred on the frame (its default phase 0 puts the blur ahead of the track).
+      const fb = fxByMatch(ins, "CC Force Motion Blur");
+      expect(paramOf(fb, "Shutter Phase").value).toBe(-90);
+      expect(paramOf(fb, "Shutter Angle").value).toBe(180);
+      expect(r.motion_blur.shutter).toEqual({ angle: 180, phase: -90 });
       const lv = fxByMatch(ins, "ADBE Pro Levels2");
       expect(paramOf(lv, "Output Black").value).toBeCloseTo(0.05 * unit, 9);
       expect(paramOf(lv, "Input Black").value).toBeCloseTo(0.02 * unit, 9);

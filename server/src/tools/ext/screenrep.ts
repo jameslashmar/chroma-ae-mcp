@@ -29,9 +29,11 @@
  *   It renders the plate before the write to measure, renders again afterwards
  *   for a before / after contact sheet, and lists the follow-ups.
  *
- * Not built, because AE cannot be scripted for it: rotoscoping hands or objects
- * that cross the screen (Roto Brush and Mocha have no API, and ML segmentation is
- * out of scope). The tool reports it and asks for a roto layer of the user's.
+ * Hands or objects crossing a green or blue screen are kept over the insert by
+ * ae_screen_foreground (screenfg.ts), a key measured on renders. Not built,
+ * because AE cannot be scripted for it: rotoscoping them across a screen that
+ * shows a picture (Roto Brush and Mocha have no API, and ML segmentation is out
+ * of scope). The tool reports it and asks for a roto layer of the user's.
  *
  * Unmeasured on AE 26 (the code works either way and reports what it found):
  * - CC Power Pin's point names and order, and its match names (its Expansion (%)
@@ -990,7 +992,8 @@ export function drawBeforeAfterSheet(before: SheetShot[], after: SheetShot[], ma
     shots.slice(0, cols).map((s) => {
       const fit = fitWithin(s.image.width, s.image.height, maxTile);
       const img = resizeArea(s.image, fit.width, fit.height);
-      drawLabel(img, `${tag} ${s.label} t=${r2(s.time)}`, 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
+      // The label font has capitals, digits and a few marks only: lower case letters were dropped.
+      drawLabel(img, `${tag} ${s.label} ${r2(s.time)} S`.toUpperCase(), 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
       return img;
     });
   const top = tiles(before, "before");
@@ -1149,7 +1152,7 @@ export const AeScreenReplaceSchema = z
       .enum(["none", "transform_pin", "force"])
       .default("none")
       .describe(
-        "none: the pin alone (pin effects get no layer motion blur). transform_pin: the similarity part of the track on the layer's Position, Rotation and Scale plus the residual perspective in the pin, with the layer's motion blur switch on (and the comp's, if it was off). force: CC Force Motion Blur on the layer."
+        "none: the pin alone (pin effects get no layer motion blur). transform_pin: the similarity part of the track on the layer's Position, Rotation and Scale plus the residual perspective in the pin, with the layer's motion blur switch on (and the comp's, if it was off). force: CC Force Motion Blur on the layer, at the comp's shutter angle and centred on the frame (phase -angle / 2; the effect's own default 0 puts the blur ahead of the track)."
       ),
     match_look: z.boolean().default(true).describe("Measure the plate and match it: Levels so the insert's blacks sit at the screen's black, and a 0-2 px Gaussian Blur from the bezel's softness. Needs renders. Default true."),
     white_mode: z.enum(["keep", "match"]).default("keep").describe("Levels Output White: keep it at white (default; the old picture's brightest pixels say nothing about the screen's limit) or match the plate's measured white."),
@@ -1823,7 +1826,7 @@ async function measureLook(
 }
 
 const FOLLOW_UPS = [
-  "Hands, fingers or objects that cross the screen are not rotoscoped by this tool (Roto Brush and Mocha have no scripting): make a roto layer of your own and use it as a holdout (a garbage-matte tool with matte_layer, or a track matte on the insert).",
+  "Hands, fingers or objects that cross a green or blue screen: ae_screen_foreground keeps them over the insert (a measured key limited to the insert, the edge's screen light swapped for the new screen, the insert's motion blur centred). On a screen showing a picture (not a key colour) they need a roto layer of your own as a holdout (Roto Brush and Mocha have no scripting).",
   "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check before delivering: patch_layers the insert, region_track the same track this call used, so slip (does the insert slide on the plate?) is measured along it on renders, with seam and flicker.",
 ];
 
@@ -2255,8 +2258,8 @@ export const screenrepTools: ToolDefinition<any>[] = [
       "Replace a screen, sign or poster on a tracked plane in ONE undo step, from a planar track (ae_track_multi / ae_track_read) and the screen's four corners [UL, UR, LR, LL] at the reference frame (ae_screen_corners). " +
       "It makes: (1) an insert precomp '<name> INSERT' at the screen's aspect (estimated from the corners in perspective, or `insert_aspect`) holding the footage or comp at 100%, filled or fitted (`fit`) so it keeps its proportions; (2) the insert layer directly above `plate`, with CC Power Pin (default) or Corner Pin keyed to the corners moved by the track, in the layer's own space, with `expansion_pct` (default 2%) of overscan under the bezel; " +
       "(3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; " +
-      "(5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur. Effects follow the shared order (colour, blur, pin, motion blur). " +
-      "After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: occluding hands need a roto layer of yours (not scriptable), grain (ae_patch_grain) and a check (ae_patch_check). " +
+      "(5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur centred on the frame. Effects follow the shared order (colour, blur, pin, motion blur). " +
+      "After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: hands or objects crossing a green or blue screen (ae_screen_foreground), grain (ae_patch_grain) and a check (ae_patch_check). " +
       "Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, motion_blur transform_pin in a comp with non-square pixels, and reflections without AE 23+ track mattes. In a comp with non-square pixels the screen's aspect is worked out as the picture shows (each comp pixel its pixel aspect wide) and the square-pixel insert is pinned so it shows at that aspect. " +
       "The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " +
       AGENT_SAFETY_GUIDANCE,

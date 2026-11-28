@@ -604,6 +604,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_patch_finish",
   "ae_screen_corners",
   "ae_screen_replace",
+  "ae_screen_foreground",
   "ae_create_comp",
   "ae_project_items",
   "ae_project_settings",

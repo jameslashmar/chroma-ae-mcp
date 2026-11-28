@@ -270,3 +270,22 @@ The SIFT reference could not judge the three marked green walls: too few, too fa
 - **CC Power Pin**: with the reference motion written by `ae_screen_replace`, the rendered insert was within 0.99 px of the corners on all 37 sampled frames (a constant 1 px inward bias of the render). Expansion 2 landed within 0.85 px of expandQuad's corners.
 - **Speed**: 180-500 ms of Node per frame for a region or screen track (1280 x 1080), on top of AE's render.
 - **Mind the comp.** A pinned insert left on in the comp is rendered with the plate: a screen track run with the previous track's magenta insert on top followed its flicker. Track with `isolate_layers` on the plate.
+
+## Keeping a hand over a replaced screen (AE 27.0x78, Windows, 2026-11-28)
+
+The HCW laptop plate (a green screen with a hand moving across it, 1280 x 1080 with pixel aspect 1.5), after `ae_screen_replace` put a UI picture on it. Measured on AE's own renders of the plate, not on frames decoded outside AE: AE rendered this plate up to 11 levels brighter in the shadows than ffmpeg's frames (a tone curve, about 1.5 levels in the highlights), so colour judged against outside frames is wrong by that much.
+
+**What a default key did** (Keylight with its defaults, Key Cleaner, Advanced Spill Suppressor, as `ae_key_greenscreen` builds it), on pixels the plate says are surely skin or surely screen:
+
+- the hand was see-through: Keylight's matte inside the skin was 0.86-0.92 (1st percentile 0.855), so the insert's circles and tile edges showed through the finger;
+- 7-12% of the old screen stayed over the insert (matte 0.07-0.12 on the screen);
+- Key Cleaner (Additional Edge Radius 10) put a half-transparent ring about 10 px wide round the fingers, carrying the old screen's colour and moving with the hand;
+- Advanced Spill Suppressor moved skin that had no spill on it: +8 to +13 levels of blue and +5 to +7 of red (Ultra), or -5.5 to -7.6 of green (Standard). The skin's G/R ratio was the same within 6 px of the screen as 120 px away from it (0.72-0.80): this laptop screen lights the hand too little to see.
+
+**What `ae_screen_foreground` does instead**, and what it measured:
+
+- Clip Black from the 99.5th percentile of Keylight's raw matte on sure screen (0.22, so 24) and Clip White from the 0.5th percentile on sure skin (0.855, so 83.5), with Replace Method Source: on the check frames 0.05% of the skin is under 0.98 and its colour is the plate's to 0 levels. No Key Cleaner and no spill suppressor.
+- The subject's edge, 0-4 px in from where the matte crosses 0.5, was 8-13 levels greener than its middle (16-18% of the old screen's colour, brightness aside): the old screen in the edge's mixed pixels and bleed. Fitted against the wrap map the tool builds (blur(1 - a) x a; AE's Fast Box Blur x3 of radius 2 matched the emulation to 0.003 per pixel), the strength is 0.97 at radius 3 (1.2 at radius 2, beyond what one layer at 100% opacity can do). With it, 88-95% of the old screen in the edge was replaced by the insert's colour next to the edge (`check.edge.swapped_pct`, comp minus plate against the share times new minus old). By eye: the fingertip's green-yellow line became the tile's blue over a blue tile, with no dark line.
+- The first fit, on the key channel's excess, read a finger's darker edge as screen (the excess shrinks with brightness) and asked for more; the fit now works on chromaticity (the excess over the mean of R, G and B).
+- The screen moved up to 5.5 px a frame as the picture shows it, and the insert had no motion blur: its content stayed sharp while the bezel and the hand were smeared. CC Force Motion Blur's own default shutter phase is 0, which puts the blur half a shutter ahead of the frame, up to 1.4 px ahead of the plate's here; the track follows the middle of the plate's blur, so the tool (and `ae_screen_replace`'s `force`) sets phase -angle / 2.
+- A whole call (three writes and 32 renders) took 16-18 s.

@@ -454,8 +454,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path63, errorMaps, issueData } = params;
-      const fullPath = [...path63, ...issueData.path || []];
+      const { data, path: path64, errorMaps, issueData } = params;
+      const fullPath = [...path64, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -763,11 +763,11 @@ var init_types = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path63, key) {
+      constructor(parent, value, path64, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path63;
+        this._path = path64;
         this._key = key;
       }
       get path() {
@@ -6995,9 +6995,9 @@ function resolveRoots(s) {
   if (explicit) {
     finals = new Set(ids);
   } else {
-    const queued10 = project2.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
-    if (o.scope === "delivery" && queued10.length > 0) {
-      ids = queued10.map((it) => it.comp_id);
+    const queued11 = project2.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
+    if (o.scope === "delivery" && queued11.length > 0) {
+      ids = queued11.map((it) => it.comp_id);
       finals = new Set(ids);
     } else {
       ids = [...s.comps.keys()];
@@ -8961,8 +8961,8 @@ function selectRqItem(read3, want) {
 }
 function selectWholeQueue(read3) {
   const items = read3?.items ?? [];
-  const queued10 = items.filter((i) => i.status === "queued");
-  if (queued10.length === 0) {
+  const queued11 = items.filter((i) => i.status === "queued");
+  if (queued11.length === 0) {
     const others = items.filter((i) => i.status !== "queued").length;
     return {
       ok: false,
@@ -8972,22 +8972,22 @@ function selectWholeQueue(read3) {
   }
   const outputs = [];
   const warnings = [];
-  for (const i of queued10) {
+  for (const i of queued11) {
     const { paths, missing } = itemOutputs(i);
     if (missing.length > 0 || paths.length === 0) {
       return { ok: false, code: "rq_item_no_output", message: `Queued Render Queue item ${i.index} has no output file on output module(s) ${missing.join(", ") || "1"}. Give it one with ae_render_queue_edit first.` };
     }
     outputs.push(...paths);
   }
-  const skipped = items.length - queued10.length;
+  const skipped = items.length - queued11.length;
   if (skipped > 0) warnings.push(`${skipped} item(s) are not QUEUED and will not render (UNQUEUED, DONE and the like are skipped by aerender).`);
   if (read3?.truncated) warnings.push("The Render Queue was read only up to its first 500 items.");
   return {
     ok: true,
     selection: {
       comp_name: "<render queue>",
-      comp_ids: Array.from(new Set(queued10.map((i) => i.comp_id))),
-      item_indexes: queued10.map((i) => i.index),
+      comp_ids: Array.from(new Set(queued11.map((i) => i.comp_id))),
+      item_indexes: queued11.map((i) => i.index),
       outputs: outputs.slice(0, 500),
       warnings
     }
@@ -12408,8 +12408,8 @@ async function runGuardedWrite(ctx, spec) {
     throw withOutcome(new BridgeError({ kind: "evalscript_error", op_id: opId, message }), sent ? "unknown" : "not_applied", spec.label, checkpointPath);
   }
 }
-function expectThat(mismatches, ok, path63, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path63, expected, actual, message });
+function expectThat(mismatches, ok, path64, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path64, expected, actual, message });
 }
 var init_write_runner = __esm({
   "src/tools/ext/write-runner.ts"() {
@@ -15522,10 +15522,10 @@ function stripHasEdge(png, xa, xb, y) {
 }
 function hasPillBorders(png, label2, wordHeight, farFactor = OUTLINE_FAR_FACTOR) {
   const y = (label2.y1 + label2.y2) / 2;
-  const near10 = OUTLINE_NEAR_FACTOR * wordHeight;
+  const near11 = OUTLINE_NEAR_FACTOR * wordHeight;
   const far = farFactor * wordHeight;
-  const left = stripHasEdge(png, label2.x1 - far, label2.x1 - near10, y);
-  const right = stripHasEdge(png, label2.x2 + near10, label2.x2 + far, y);
+  const left = stripHasEdge(png, label2.x1 - far, label2.x1 - near11, y);
+  const right = stripHasEdge(png, label2.x2 + near11, label2.x2 + far, y);
   return left && right;
 }
 function rowBackground(png, y) {
@@ -17024,12 +17024,12 @@ function keyExtrasMismatches(extras, keys, afterSnapshot) {
   const kfs = afterSnapshot?.keyframes ?? [];
   const truncated = afterSnapshot?.truncated === true;
   const compare = (key, field, want, got, same) => {
-    const path63 = `keyframes[${key}].${field}`;
+    const path64 = `keyframes[${key}].${field}`;
     if (same === void 0 || got === void 0) {
-      unverified.push(path63);
+      unverified.push(path64);
       return;
     }
-    if (!same) mismatches.push({ path: path63, expected: want, actual: got, message: `Expected ${path63} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
+    if (!same) mismatches.push({ path: path64, expected: want, actual: got, message: `Expected ${path64} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
   };
   const flags = [
     ["spatial_continuous", "spatialContinuous"],
@@ -17192,14 +17192,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path63 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path64 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path63,
+          path: path64,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path63} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path64} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -17230,13 +17230,13 @@ function typedTextChecks(set2, justify, afterObj, coveredPaths = []) {
   for (const group of ["typography", "paragraph", "box"]) {
     const got = afterObj[group] ?? {};
     for (const [key, value] of Object.entries(want[group])) {
-      const path63 = `${group}.${key}`;
-      if (coveredPaths.includes(path63) || mixed.includes(path63) || got[key] === void 0) {
-        unverified.push(path63);
+      const path64 = `${group}.${key}`;
+      if (coveredPaths.includes(path64) || mixed.includes(path64) || got[key] === void 0) {
+        unverified.push(path64);
         continue;
       }
-      expected[path63] = value;
-      actual[path63] = got[key];
+      expected[path64] = value;
+      actual[path64] = got[key];
     }
   }
   return { expected, actual, unverified };
@@ -17391,17 +17391,17 @@ async function reloadFootage(args, ctx) {
               });
             }
           }
-          for (const failure2 of Array.isArray(written.failed) ? written.failed : []) {
+          for (const failure3 of Array.isArray(written.failed) ? written.failed : []) {
             mismatches.push({
-              path: `items[${failure2.item_id}].reload`,
+              path: `items[${failure3.item_id}].reload`,
               expected: "reloaded",
-              actual: failure2.error ?? "failed",
-              message: `Item ${failure2.item_id} (${failure2.name ?? "?"}) did not reload: ${failure2.error ?? "unknown error"}`
+              actual: failure3.error ?? "failed",
+              message: `Item ${failure3.item_id} (${failure3.name ?? "?"}) did not reload: ${failure3.error ?? "unknown error"}`
             });
           }
           return { mismatches, changed: reloadChanges(beforeItems, afterItems, reloaded) };
         },
-        (failure2) => ({ mismatches: [failure2], changed: [] })
+        (failure3) => ({ mismatches: [failure3], changed: [] })
       );
       return {
         op_id: opId,
@@ -17890,7 +17890,7 @@ var init_animate = __esm({
               const extrasCheck = checkAfterWrite(
                 opId,
                 () => keyExtrasMismatches(extras, keysUpdated, afterSnap.result),
-                (failure2) => ({ mismatches: [failure2], unverified: [] })
+                (failure3) => ({ mismatches: [failure3], unverified: [] })
               );
               let baseMismatches;
               if (curvePlan) {
@@ -18062,7 +18062,7 @@ var init_animate = __esm({
                   ...coveredByFirstRange("fauxBold", appliedRanges) ? ["typography.faux_bold"] : [],
                   ...coveredByFirstRange("fauxItalic", appliedRanges) ? ["typography.faux_italic"] : []
                 ]),
-                (failure2) => ({ expected: {}, actual: {}, unverified: [], failure: failure2 })
+                (failure3) => ({ expected: {}, actual: {}, unverified: [], failure: failure3 })
               );
               Object.assign(expectedCheck, typed.expected);
               Object.assign(actualCheck, typed.actual);
@@ -22058,12 +22058,12 @@ async function analyzeAudio(mono, sampleRate, opts = {}) {
     const last = onsets[onsets.length - 1].time;
     const periodSec = est.period / frameRate;
     beats = (await trackBeats(norm4, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
-    const near10 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
+    const near11 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
     tempo = {
       bpm: Math.round(60 / periodSec * 10) / 10,
       period: round32(periodSec),
       confidence: round32(est.confidence),
-      beats_on_onsets: beats.length ? round32(near10 / beats.length) : 0
+      beats_on_onsets: beats.length ? round32(near11 / beats.length) : 0
     };
   }
   const hits = [...onsets].sort((a, b) => b.level_db - a.level_db || b.strength - a.strength).slice(0, opts.hits ?? 20);
@@ -22498,7 +22498,7 @@ async function footageShortcut(ctx, args, info, base, maxBytes) {
   const to = l.out_point - l.start_time;
   const dur = s.footage_duration;
   const trimmed = from > 1e-3 || dur !== void 0 && to < dur - 1e-3;
-  const r313 = (x) => Math.round(x * 1e3) / 1e3;
+  const r314 = (x) => Math.round(x * 1e3) / 1e3;
   let defaultDir;
   try {
     defaultDir = args.out_path ? path23.dirname(args.out_path) : captionsFolderFor(info.project_path);
@@ -22512,13 +22512,13 @@ async function footageShortcut(ctx, args, info, base, maxBytes) {
       init: {
         ...base,
         // Word times in the file plus the layer's start time are comp times.
-        offset: r313(l.start_time),
+        offset: r314(l.start_time),
         stem: fileStem(info.name),
         defaultDir,
         outPath: args.out_path,
         source: "footage_file",
-        extra: { source_file: file, layer: { name: l.name, start_time: r313(l.start_time), in_point: r313(l.in_point), out_point: r313(l.out_point) } },
-        ...trimmed ? { window: { from_s: r313(from), to_s: r313(to) } } : {}
+        extra: { source_file: file, layer: { name: l.name, start_time: r314(l.start_time), in_point: r314(l.in_point), out_point: r314(l.out_point) } },
+        ...trimmed ? { window: { from_s: r314(from), to_s: r314(to) } } : {}
       }
     }
   };
@@ -26543,7 +26543,7 @@ function createRenderbatch(options = {}) {
     }
     return runnerInstance;
   };
-  const queued10 = (err, opId) => {
+  const queued11 = (err, opId) => {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
   };
@@ -26692,7 +26692,7 @@ function createRenderbatch(options = {}) {
             return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig, sequence_prep: sequencePrep };
           });
         } catch (err) {
-          return queued10(err, opId);
+          return queued11(err, opId);
         }
         if (!ready.ok) return ready;
         let sequenceCheck;
@@ -26859,7 +26859,7 @@ function createRenderbatch(options = {}) {
             }
           });
         } catch (err) {
-          return queued10(err, opId);
+          return queued11(err, opId);
         }
         if (!fs23.existsSync(batch.frozen_project)) {
           return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
@@ -28439,7 +28439,7 @@ function planStart(queue2, overwrite, live = [], only) {
       message: `The Render Queue read stopped at ${queue2.items.length} of ${queue2.numItems} items, so the rest were not checked and render() would still render them. Nothing was started. Remove or unqueue items first.`
     });
   }
-  let queued10 = queue2.items.filter((i) => i.status === "queued");
+  let queued11 = queue2.items.filter((i) => i.status === "queued");
   if (only) {
     const chosen = [];
     const seenIdx = /* @__PURE__ */ new Set();
@@ -28470,7 +28470,7 @@ function planStart(queue2, overwrite, live = [], only) {
       }
       chosen.push(it);
     });
-    queued10 = chosen;
+    queued11 = chosen;
     for (const it of queue2.items) {
       if (it.status !== "queued" || chosen.includes(it)) continue;
       hold.push({
@@ -28490,16 +28490,16 @@ function planStart(queue2, overwrite, live = [], only) {
       });
     }
   }
-  if (queued10.length === 0 && !only) {
+  if (queued11.length === 0 && !only) {
     refusals.push({
       code: "nothing_queued",
       message: "No Render Queue item is QUEUED, so Render would do nothing. Queue one with ae_render_queue_edit (queued: true) or add one with ae_render_queue_add. A finished (DONE) item cannot be queued again (After Effects locks it): make a fresh copy of it with ae_render_queue_duplicate."
     });
   }
-  if (queued10.length > MAX_ITEMS2) {
+  if (queued11.length > MAX_ITEMS2) {
     refusals.push({
       code: "too_many_items",
-      message: `${queued10.length} items are QUEUED; this tool checks and reports at most ${MAX_ITEMS2}, and render() renders all of them. Nothing was started. Unqueue some items.`
+      message: `${queued11.length} items are QUEUED; this tool checks and reports at most ${MAX_ITEMS2}, and render() renders all of them. Nothing was started. Unqueue some items.`
     });
   }
   const seen = /* @__PURE__ */ new Map();
@@ -28512,7 +28512,7 @@ function planStart(queue2, overwrite, live = [], only) {
   if (liveUnknown) {
     refusals.push({ code: "output_in_use", message: `${liveUnknown} is running, so its outputs are not known and could be the same files. Wait for it or cancel it. Nothing was started.` });
   }
-  for (const it of queued10.slice(0, MAX_ITEMS2)) {
+  for (const it of queued11.slice(0, MAX_ITEMS2)) {
     const job = { index: it.index, comp_id: it.comp_id, comp_name: it.comp_name, outputs: [] };
     if (it.output_modules_truncated === true) {
       refusals.push({
@@ -30058,7 +30058,7 @@ function analyzeDecodedFrame(png, meta) {
   if (isBlank2) flags.push("blank");
   if (isBlack) flags.push("black");
   if (isTransparent) flags.push("transparent");
-  const round42 = (n) => Math.round(n * 1e4) / 1e4;
+  const round43 = (n) => Math.round(n * 1e4) / 1e4;
   return {
     index: meta.index,
     path: meta.path,
@@ -30071,10 +30071,10 @@ function analyzeDecodedFrame(png, meta) {
     is_uniform: isUniform,
     flags,
     mean_rgba: [
-      round42(sumR / (totalPixels * 255)),
-      round42(sumG / (totalPixels * 255)),
-      round42(sumB / (totalPixels * 255)),
-      round42(sumA / (totalPixels * 255))
+      round43(sumR / (totalPixels * 255)),
+      round43(sumG / (totalPixels * 255)),
+      round43(sumB / (totalPixels * 255)),
+      round43(sumA / (totalPixels * 255))
     ]
   };
 }
@@ -31778,10 +31778,10 @@ function zoomFromLens(compWidth, lens) {
 function angleOfViewFromZoom(compWidth, zoom) {
   return 2 * Math.atan(compWidth / 2 / zoom) * 180 / Math.PI;
 }
-function expectSpan(m, path63, l, duration) {
-  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path63}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
+function expectSpan(m, path64, l, duration) {
+  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path64}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
   if (typeof l.out_point === "number" && typeof duration === "number") {
-    expectThat(m, l.out_point >= duration - 0.05, `${path63}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
+    expectThat(m, l.out_point >= duration - 0.05, `${path64}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
   }
 }
 function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
@@ -31876,28 +31876,28 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
     return typeof want === "number" && close2(got, want);
   };
   for (const c of w.changes) {
-    const path63 = `camera.${c.key}`;
+    const path64 = `camera.${c.key}`;
     if (c.key === "depth_of_field") {
-      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path63, c.value === 1, cam.dof, "Depth of field is not as asked");
+      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path64, c.value === 1, cam.dof, "Depth of field is not as asked");
     } else if (c.key === "focus_expression") {
-      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path63, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
+      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path64, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
     } else if (c.key === "nodes") {
-      expectThat(m, cam.two_node === (c.value === "two"), path63, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
+      expectThat(m, cam.two_node === (c.value === "two"), path64, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
     } else if (c.keyed) {
       const field = keyField[c.key];
       const nowKeys = field ? cam.num_keys?.[field] : void 0;
       const wasKeys = field && was ? was.num_keys?.[field] : void 0;
       if (typeof nowKeys === "number" && typeof wasKeys === "number") {
         const want = wasKeys + (c.replaced_key ? 0 : 1);
-        expectThat(m, nowKeys === want, `${path63}.num_keys`, want, nowKeys, "The new keyframe is not there");
+        expectThat(m, nowKeys === want, `${path64}.num_keys`, want, nowKeys, "The new keyframe is not there");
       }
       const keyedV = field ? cam.values_at?.[field] : void 0;
       if (typeof c.value === "number" || Array.isArray(c.value)) {
-        expectThat(m, sameValue2(keyedV, c.value), `${path63}.value_at_key`, c.value, keyedV, `${c.key} at the keyed time differs from what was asked`);
+        expectThat(m, sameValue2(keyedV, c.value), `${path64}.value_at_key`, c.value, keyedV, `${c.key} at the keyed time differs from what was asked`);
       }
     } else {
       const got = valueOf[c.key];
-      expectThat(m, sameValue2(got, c.value), path63, c.value, got, `${c.key} differs from what was asked`);
+      expectThat(m, sameValue2(got, c.value), path64, c.value, got, `${c.key} differs from what was asked`);
     }
     if (c.key === "focus_distance" && !c.keyed) {
       expectThat(m, cam.expressions.focus_distance === void 0, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
@@ -32519,10 +32519,10 @@ var init_explain = __esm({
               } finally {
                 endInflight(opId);
               }
-              const { value: after, failure: failure2 } = await readAfterWrite(opId, () => read3("after"));
-              const custom2 = [...failure2 ? [failure2] : [], ...proofMismatches(before, failure2 ? null : after, cleanupError, copyId)];
+              const { value: after, failure: failure3 } = await readAfterWrite(opId, () => read3("after"));
+              const custom2 = [...failure3 ? [failure3] : [], ...proofMismatches(before, failure3 ? null : after, cleanupError, copyId)];
               const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-              await noteAfterWrite(ctx, note, { skipRead: !!failure2 });
+              await noteAfterWrite(ctx, note, { skipRead: !!failure3 });
               const verdict2 = proofVerdict(args.suspect, diff, proofError, scope);
               return {
                 op_id: opId,
@@ -33152,22 +33152,22 @@ function entranceExit(layerTweens, info, frame) {
   if (!mt.length) return {};
   const inP = info?.in_point ?? null;
   const outP = info?.out_point ?? null;
-  const near10 = 0.5;
+  const near11 = 0.5;
   let entrance = mt.find((t) => {
-    if (inP !== null && t.start <= inP + near10) return true;
+    if (inP !== null && t.start <= inP + near11) return true;
     return t.cls === "opacity" && (t.prop.samples.values[0]?.[0] ?? 100) <= 5 && t === mt[0];
   });
   let exit;
   for (let i = mt.length - 1; i >= 0; i--) {
     const t = mt[i];
     const fadesOut = t.cls === "opacity" && (t.prop.samples.values[t.prop.samples.values.length - 1]?.[0] ?? 100) <= 5;
-    if (outP !== null && t.end >= outP - near10 || fadesOut) {
+    if (outP !== null && t.end >= outP - near11 || fadesOut) {
       exit = t;
       break;
     }
   }
   if (entrance && exit && (entrance === exit || Math.abs(entrance.start - exit.start) <= frame)) {
-    if (inP !== null && entrance.start <= inP + near10) exit = void 0;
+    if (inP !== null && entrance.start <= inP + near11) exit = void 0;
     else entrance = void 0;
   }
   return { entrance, exit };
@@ -33732,14 +33732,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path63, target, taste, choreo) {
+function reviewProperty(s, analysis, speeds, path64, target, taste, choreo) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path63 }
+    property: { name: s.property.name, path: path64 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix2 = (keys, extra2 = {}) => ({
@@ -33747,7 +33747,7 @@ function reviewProperty(s, analysis, speeds, path63, target, taste, choreo) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path63,
+      path: path64,
       keys,
       ease: easeArg,
       ...extra2,
@@ -34595,11 +34595,11 @@ function buildActions(raw) {
   const dur = raw.comp.duration;
   for (const l of raw.layers) {
     if (!l.enabled || !VISIBLE_ROLES.has(l.role)) continue;
-    const near10 = (t) => actions.some((a) => a.layer === l.index && (Math.abs(a.start - t) <= 0.1 || Math.abs(a.end - t) <= 0.1));
-    if (l.in_point > 0.05 && l.in_point < dur && !near10(l.in_point)) {
+    const near11 = (t) => actions.some((a) => a.layer === l.index && (Math.abs(a.start - t) <= 0.1 || Math.abs(a.end - t) <= 0.1));
+    if (l.in_point > 0.05 && l.in_point < dur && !near11(l.in_point)) {
       actions.push({ layer: l.index, name: l.name, verb: "enters", start: l.in_point, end: l.in_point });
     }
-    if (l.out_point < dur - 0.05 && l.out_point > 0 && !near10(l.out_point)) {
+    if (l.out_point < dur - 0.05 && l.out_point > 0 && !near11(l.out_point)) {
       actions.push({ layer: l.index, name: l.name, verb: "leaves", start: l.out_point, end: l.out_point });
     }
   }
@@ -35373,18 +35373,18 @@ function measureFrame(png, index = 0) {
     }
   }
   const total2 = Math.max(1, w * h);
-  const round42 = (n) => Math.round(n * 1e4) / 1e4;
+  const round43 = (n) => Math.round(n * 1e4) / 1e4;
   return {
     hash: crypto11.createHash("md5").update(data).digest("hex"),
     kind,
     flags: analysis.flags,
-    mean_luma: round42(lumaSum / (255 * total2)),
-    clip_frac: round42(clip6 / total2),
+    mean_luma: round43(lumaSum / (255 * total2)),
+    clip_frac: round43(clip6 / total2),
     edges: {
-      top: round42(top / Math.max(1, by * w)),
-      bottom: round42(bottom / Math.max(1, by * w)),
-      left: round42(left / Math.max(1, bx * h)),
-      right: round42(right / Math.max(1, bx * h))
+      top: round43(top / Math.max(1, by * w)),
+      bottom: round43(bottom / Math.max(1, by * w)),
+      left: round43(left / Math.max(1, bx * h)),
+      right: round43(right / Math.max(1, bx * h))
     },
     width: w,
     height: h
@@ -36273,12 +36273,12 @@ function pathChecksum(p) {
   }
   return Math.round(sum * 1e3) / 1e3;
 }
-function comparePoints(expected, actual, path63, m) {
+function comparePoints(expected, actual, path64, m) {
   for (let i = 0; i < expected.length; i++) {
     const a = actual[i];
     const e = expected[i];
     if (!a || Math.abs(a[0] - e[0]) > PATH_TOLERANCE || Math.abs(a[1] - e[1]) > PATH_TOLERANCE) {
-      m.push({ path: `${path63}[${i}]`, expected: e, actual: a, message: `${path63} differs from what was written at vertex ${i + 1}` });
+      m.push({ path: `${path64}[${i}]`, expected: e, actual: a, message: `${path64} differs from what was written at vertex ${i + 1}` });
       return;
     }
   }
@@ -36753,14 +36753,14 @@ var init_paths = __esm({
         description: "Read one path as JSON: a mask path or a free path ('ADBE Vector Shape - Group') in a shape layer's top-level group, with vertices, inTangents, outTangents and closed (up to 500 vertices, `truncated` says if more), its keyframe times, expression state, feather-point count (masks) and path direction (shapes). include_operators also lists the group's Trim Paths, Offset Paths and Repeater values and keys. Rectangles, ellipses and stars have no vertices and are refused. Read-only: never changes the time, selection or anything else in the project. " + AGENT_SAFETY_GUIDANCE,
         schema: AePathReadSchema,
         handler: async (args, ctx) => {
-          const path63 = await readPath(ctx, "ae_path_read", args);
-          if (!args.include_operators || !args.target.shape || !path63) return path63;
+          const path64 = await readPath(ctx, "ae_path_read", args);
+          if (!args.include_operators || !args.target.shape || !path64) return path64;
           const ops = await ctx.bridge.callHost(
             "pathsOperators",
-            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path63.group?.index } },
+            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path64.group?.index } },
             readOpts("ae_path_read", `ae_path_read(${args.comp_id}) operators`)
           );
-          return { ...path63, operators: ops.result };
+          return { ...path64, operators: ops.result };
         }
       },
       {
@@ -36769,24 +36769,24 @@ var init_paths = __esm({
         schema: AePathWriteSchema,
         handler: async (args, ctx) => {
           let current = null;
-          let path63;
+          let path64;
           try {
             if (args.operation === "set") {
-              path63 = toPathData(args.path);
+              path64 = toPathData(args.path);
             } else {
               current = await readPath(ctx, "ae_path_write", args);
               if (!current) return badArgs("The path could not be read.");
               if (current.path.truncated) return badArgs(`The path has ${current.path.vertexCount} vertices; only paths of up to ${MAX_PATH_VERTICES2} can be changed here.`);
               if (current.numKeys > 0 && args.time === void 0) return badArgs(`The path is keyframed (${current.numKeys} keys); give \`time\` to write a key at that time.`);
               if (current.expression.enabled) return badArgs("The path has an expression, which overrides any value written here; remove it first (ae_path_link with unlink).");
-              path63 = applyPathOperation(args, toData(current));
+              path64 = applyPathOperation(args, toData(current));
             }
           } catch (err) {
             if (err instanceof PathMathError) return badArgs(err.message);
             throw err;
           }
           if (args.dry_run) {
-            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path63.vertices.length, path: path63, source: current?.path };
+            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path64.vertices.length, path: path64, source: current?.path };
           }
           const base = current && { count: current.path.vertexCount, checksum: pathChecksum(current.path) };
           return runGuardedWrite(ctx, {
@@ -36800,7 +36800,7 @@ var init_paths = __esm({
               args: {
                 comp_id: args.comp_id,
                 target: args.target,
-                path: path63,
+                path: path64,
                 time: args.time,
                 base,
                 allow_vertex_count_change: args.allow_vertex_count_change,
@@ -36810,7 +36810,7 @@ var init_paths = __esm({
                 label: `Path ${args.operation}`
               }
             },
-            check: (_before, after, w) => pathWriteMismatches(path63, after, args, w),
+            check: (_before, after, w) => pathWriteMismatches(path64, after, args, w),
             present: (_before, after, w) => ({ ...w, path: asReadout(after)?.path, numKeys: asReadout(after)?.numKeys })
           });
         }
@@ -37032,17 +37032,17 @@ async function runPurge(args, ctx) {
       } catch {
       }
       let after = null;
-      let failure2 = null;
+      let failure3 = null;
       try {
         after = await readOnce("after");
       } catch (err) {
-        failure2 = readBackMismatch(opId, "the read-back failed", err);
+        failure3 = readBackMismatch(opId, "the read-back failed", err);
       }
-      await moveBaseline(ctx, opId, toolName, label2, expect, failure2 === null);
+      await moveBaseline(ctx, opId, toolName, label2, expect, failure3 === null);
       let custom2;
       let shown;
-      if (failure2) {
-        custom2 = [failure2];
+      if (failure3) {
+        custom2 = [failure3];
         shown = { ...written, warnings };
       } else {
         try {
@@ -42014,10 +42014,10 @@ async function checkHandler(args, ctx) {
         endInflight(removeId);
         endInflight(opId);
       }
-      const { value: after, failure: failure2 } = await readAfterWrite(opId, () => state("after"));
-      const custom2 = [...failure2 ? [failure2] : [], ...tempCompMismatches(before, failure2 ? null : after, cleanupError, copyId)];
+      const { value: after, failure: failure3 } = await readAfterWrite(opId, () => state("after"));
+      const custom2 = [...failure3 ? [failure3] : [], ...tempCompMismatches(before, failure3 ? null : after, cleanupError, copyId)];
       const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-      await noteAfterWrite(ctx, note, { skipRead: !!failure2 });
+      await noteAfterWrite(ctx, note, { skipRead: !!failure3 });
       const untestedAll = [];
       for (const l of overflow) {
         for (const s of l.samples) {
@@ -46181,10 +46181,10 @@ function pyrDown(img) {
     const c = 2 * y;
     const r0 = refl(c - 2, h) * ow;
     const r14 = refl(c - 1, h) * ow;
-    const r214 = refl(c, h) * ow;
-    const r313 = refl(c + 1, h) * ow;
-    const r410 = refl(c + 2, h) * ow;
-    for (let x = 0; x < ow; x++) out[y * ow + x] = (tmp[r0 + x] + 4 * tmp[r14 + x] + 6 * tmp[r214 + x] + 4 * tmp[r313 + x] + tmp[r410 + x]) / 16;
+    const r215 = refl(c, h) * ow;
+    const r314 = refl(c + 1, h) * ow;
+    const r411 = refl(c + 2, h) * ow;
+    for (let x = 0; x < ow; x++) out[y * ow + x] = (tmp[r0 + x] + 4 * tmp[r14 + x] + 6 * tmp[r215 + x] + 4 * tmp[r314 + x] + tmp[r411 + x]) / 16;
   }
   return { width: ow, height: oh, data: out };
 }
@@ -46356,7 +46356,7 @@ function integralRgb(img, x0, y0, x1, y1) {
   for (let y = 0; y < h; y++) {
     let r0 = 0;
     let r14 = 0;
-    let r214 = 0;
+    let r215 = 0;
     const row = (y0 + y) * img.width;
     const o1 = (y + 1) * W;
     const o0 = y * W;
@@ -46364,10 +46364,10 @@ function integralRgb(img, x0, y0, x1, y1) {
       const i = (row + x0 + x) * 4;
       r0 += d[i];
       r14 += d[i + 1];
-      r214 += d[i + 2];
+      r215 += d[i + 2];
       s[0][o1 + x + 1] = s[0][o0 + x + 1] + r0;
       s[1][o1 + x + 1] = s[1][o0 + x + 1] + r14;
-      s[2][o1 + x + 1] = s[2][o0 + x + 1] + r214;
+      s[2][o1 + x + 1] = s[2][o0 + x + 1] + r215;
     }
   }
   return { x0, y0, w, h, s };
@@ -47289,11 +47289,11 @@ var init_region_track = __esm({
           if (changed || matte) {
             const from = Math.min(1, this.aligner.levels.length - 1);
             const ex2 = unionExclude(useAgain && det ? det.sampleMask(useAgain) : null, matteAt(best.H));
-            const r214 = this.aligner.align(pyr, best.H, prior, from, model, ex2);
-            if (!("failed" in r214) && accept(r214)) {
+            const r215 = this.aligner.align(pyr, best.H, prior, from, model, ex2);
+            if (!("failed" in r215) && accept(r215)) {
               const first = best;
-              r214.weights = r214.weights.map((w, l) => l > from ? first.weights[l] : w);
-              best = r214;
+              r215.weights = r215.weights.map((w, l) => l > from ? first.weights[l] : w);
+              best = r215;
               if (useAgain) occluded = useAgain.share;
             }
           }
@@ -47801,24 +47801,24 @@ var init_track = __esm({
             )
           );
           const conf = points.slice(1).map((p) => p.confidence);
-          const r214 = (v) => Math.round(v * 100) / 100;
+          const r215 = (v) => Math.round(v * 100) / 100;
           const result = {
             ok: true,
             comp_id: args.comp_id,
-            start: r214(tracked.start),
-            end: r214(tracked.end),
+            start: r215(tracked.start),
+            end: r215(tracked.end),
             frames_requested: tracked.times.length,
             frames_tracked: points.length,
             lost_at: lostAt,
-            mean_confidence: conf.length ? r214(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
-            min_confidence: conf.length ? r214(Math.min(...conf)) : null,
+            mean_confidence: conf.length ? r215(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
+            min_confidence: conf.length ? r215(Math.min(...conf)) : null,
             adapted_frames: points.filter((p) => p.adapted).length,
-            pattern_contrast: r214(tracked.contrast),
+            pattern_contrast: r215(tracked.contrast),
             pattern_size_used: tracked.pattern.size,
-            ...tracked.pattern.isotropy !== null ? { pattern_isotropy: r214(tracked.pattern.isotropy) } : {},
+            ...tracked.pattern.isotropy !== null ? { pattern_isotropy: r215(tracked.pattern.isotropy) } : {},
             ...tracked.pattern.note ? { pattern_note: tracked.pattern.note } : {},
             preview_path: previewPath,
-            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r214(p.x), r214(p.y), r214(p.confidence)]),
+            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r215(p.x), r215(p.y), r215(p.confidence)]),
             path_format: "[time_s, x_px, y_px, confidence]"
           };
           if (!args.apply) return result;
@@ -47861,7 +47861,7 @@ var init_track = __esm({
           if (write.made.numKeys !== points.length) {
             mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
           }
-          keys.forEach((k, i) => compareValues(values[i].map(r214), k.value.slice(0, 2).map(r214), `keyframes[${i + 1}].value`, mismatches));
+          keys.forEach((k, i) => compareValues(values[i].map(r215), k.value.slice(0, 2).map(r215), `keyframes[${i + 1}].value`, mismatches));
           const receipt = buildReceipt({ before: null, after: { null: write.made, keys_read: keys.length }, customMismatches: mismatches });
           return {
             ...result,
@@ -48259,9 +48259,9 @@ function keyPresenceOf(key, r, g, b) {
   const s = r + g + b;
   if (!(s > 0)) return 0;
   const d = Math.hypot(r / s - key.chroma[0], g / s - key.chroma[1]);
-  const near10 = Math.max(0.08, key.outer);
-  const far = near10 + 0.06;
-  let a = d <= near10 ? 1 : d >= far ? 0 : (far - d) / (far - near10);
+  const near11 = Math.max(0.08, key.outer);
+  const far = near11 + 0.06;
+  let a = d <= near11 ? 1 : d >= far ? 0 : (far - d) / (far - near11);
   if (a > 0) {
     const l = luma(r, g, b);
     const dark0 = 0.15 * key.luma;
@@ -48675,8 +48675,8 @@ function matteOf(png) {
 function screenArea(corners, minBand = 0) {
   const cx = corners.reduce((t, p) => t + p[0], 0) / corners.length;
   const cy = corners.reduce((t, p) => t + p[1], 0) / corners.length;
-  const near10 = Math.min(...corners.map((p) => Math.hypot(p[0] - cx, p[1] - cy)));
-  const g = Math.max(1.04, near10 > 0 ? 1 + minBand / near10 : 1.04);
+  const near11 = Math.min(...corners.map((p) => Math.hypot(p[0] - cx, p[1] - cy)));
+  const g = Math.max(1.04, near11 > 0 ? 1 + minBand / near11 : 1.04);
   return corners.map((p) => [r4(cx + (p[0] - cx) * g), r4(cy + (p[1] - cy) * g)]);
 }
 function quadOfRegion(r) {
@@ -48969,10 +48969,10 @@ function cornerJitter(track, quad) {
   if (frames.length < 8) return null;
   let worst = 0;
   for (const corner of quad) {
-    const path63 = frames.map((f) => applyH(f.H, corner));
+    const path64 = frames.map((f) => applyH(f.H, corner));
     const d3 = [];
-    for (let i = 3; i < path63.length; i++) {
-      const [a, b, c, d] = [path63[i - 3], path63[i - 2], path63[i - 1], path63[i]];
+    for (let i = 3; i < path64.length; i++) {
+      const [a, b, c, d] = [path64[i - 3], path64[i - 2], path64[i - 1], path64[i]];
       if (!a || !b || !c || !d) continue;
       d3.push(Math.hypot(d[0] - 3 * c[0] + 3 * b[0] - a[0], d[1] - 3 * c[1] + 3 * b[1] - a[1]));
     }
@@ -52620,10 +52620,10 @@ async function runWithPlateCopy(ctx, spec) {
       endInflight(removeId);
       endInflight(opId);
     }
-    const { value: after, failure: failure2 } = await readAfterWrite(opId, () => state("after"));
-    const custom2 = [...failure2 ? [failure2] : [], ...copyMismatches(before, failure2 ? null : after, cleanupError, copyId)];
+    const { value: after, failure: failure3 } = await readAfterWrite(opId, () => state("after"));
+    const custom2 = [...failure3 ? [failure3] : [], ...copyMismatches(before, failure3 ? null : after, cleanupError, copyId)];
     const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-    await noteAfterWrite(ctx, note, { skipRead: !!failure2 });
+    await noteAfterWrite(ctx, note, { skipRead: !!failure3 });
     return {
       opId,
       value,
@@ -61790,7 +61790,7 @@ function drawBeforeAfterSheet(before, after, maxTile) {
   const tiles = (shots, tag) => shots.slice(0, cols).map((s) => {
     const fit = fitWithin(s.image.width, s.image.height, maxTile);
     const img = resizeArea(s.image, fit.width, fit.height);
-    drawLabel(img, `${tag} ${s.label} t=${r213(s.time)}`, 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
+    drawLabel(img, `${tag} ${s.label} ${r213(s.time)} S`.toUpperCase(), 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
     return img;
   });
   const top = tiles(before, "before");
@@ -62785,7 +62785,7 @@ var init_screenrep = __esm({
       pin: external_exports.enum(["power_pin", "corner_pin"]).default("power_pin").describe("CC Power Pin (default; it has an Expansion parameter and keys directly) or Corner Pin."),
       expansion_pct: external_exports.number().min(0).max(10).default(1).describe("Overscan under the bezel: each edge is pushed outward by this percent of the screen's width (left, right) or height (top, bottom). CC Power Pin: its Expansion (%) Top, Left, Right and Bottom are set to it, so it can be changed in the effect afterwards; Corner Pin (or a Power Pin without those parameters): the corners in the keys are pushed out by the same amount. 0 for none. Default 1."),
       motion_blur: external_exports.enum(["none", "transform_pin", "force"]).default("none").describe(
-        "none: the pin alone (pin effects get no layer motion blur). transform_pin: the similarity part of the track on the layer's Position, Rotation and Scale plus the residual perspective in the pin, with the layer's motion blur switch on (and the comp's, if it was off). force: CC Force Motion Blur on the layer."
+        "none: the pin alone (pin effects get no layer motion blur). transform_pin: the similarity part of the track on the layer's Position, Rotation and Scale plus the residual perspective in the pin, with the layer's motion blur switch on (and the comp's, if it was off). force: CC Force Motion Blur on the layer, at the comp's shutter angle and centred on the frame (phase -angle / 2; the effect's own default 0 puts the blur ahead of the track)."
       ),
       match_look: external_exports.boolean().default(true).describe("Measure the plate and match it: Levels so the insert's blacks sit at the screen's black, and a 0-2 px Gaussian Blur from the bezel's softness. Needs renders. Default true."),
       white_mode: external_exports.enum(["keep", "match"]).default("keep").describe("Levels Output White: keep it at white (default; the old picture's brightest pixels say nothing about the screen's limit) or match the plate's measured white."),
@@ -62809,7 +62809,7 @@ var init_screenrep = __esm({
     sampleIdx3 = (n) => Array.from(/* @__PURE__ */ new Set([0, Math.floor((n - 1) / 2), n - 1])).filter((i) => i >= 0 && i < n);
     near7 = (a, b, tol) => Math.abs(a - b) <= tol;
     FOLLOW_UPS = [
-      "Hands, fingers or objects that cross the screen are not rotoscoped by this tool (Roto Brush and Mocha have no scripting): make a roto layer of your own and use it as a holdout (a garbage-matte tool with matte_layer, or a track matte on the insert).",
+      "Hands, fingers or objects that cross a green or blue screen: ae_screen_foreground keeps them over the insert (a measured key limited to the insert, the edge's screen light swapped for the new screen, the insert's motion blur centred). On a screen showing a picture (not a key colour) they need a roto layer of your own as a holdout (Roto Brush and Mocha have no scripting).",
       "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check before delivering: patch_layers the insert, region_track the same track this call used, so slip (does the insert slide on the plate?) is measured along it on renders, with seam and flicker."
     ];
     screenrepTools = [
@@ -62828,13 +62828,1047 @@ var init_screenrep = __esm({
       },
       {
         name: "ae_screen_replace",
-        description: "Replace a screen, sign or poster on a tracked plane in ONE undo step, from a planar track (ae_track_multi / ae_track_read) and the screen's four corners [UL, UR, LR, LL] at the reference frame (ae_screen_corners). It makes: (1) an insert precomp '<name> INSERT' at the screen's aspect (estimated from the corners in perspective, or `insert_aspect`) holding the footage or comp at 100%, filled or fitted (`fit`) so it keeps its proportions; (2) the insert layer directly above `plate`, with CC Power Pin (default) or Corner Pin keyed to the corners moved by the track, in the layer's own space, with `expansion_pct` (default 2%) of overscan under the bezel; (3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; (5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur. Effects follow the shared order (colour, blur, pin, motion blur). After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: occluding hands need a roto layer of yours (not scriptable), grain (ae_patch_grain) and a check (ae_patch_check). Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, motion_blur transform_pin in a comp with non-square pixels, and reflections without AE 23+ track mattes. In a comp with non-square pixels the screen's aspect is worked out as the picture shows (each comp pixel its pixel aspect wide) and the square-pixel insert is pinned so it shows at that aspect. The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " + AGENT_SAFETY_GUIDANCE,
+        description: "Replace a screen, sign or poster on a tracked plane in ONE undo step, from a planar track (ae_track_multi / ae_track_read) and the screen's four corners [UL, UR, LR, LL] at the reference frame (ae_screen_corners). It makes: (1) an insert precomp '<name> INSERT' at the screen's aspect (estimated from the corners in perspective, or `insert_aspect`) holding the footage or comp at 100%, filled or fitted (`fit`) so it keeps its proportions; (2) the insert layer directly above `plate`, with CC Power Pin (default) or Corner Pin keyed to the corners moved by the track, in the layer's own space, with `expansion_pct` (default 2%) of overscan under the bezel; (3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; (5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur centred on the frame. Effects follow the shared order (colour, blur, pin, motion blur). After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: hands or objects crossing a green or blue screen (ae_screen_foreground), grain (ae_patch_grain) and a check (ae_patch_check). Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, motion_blur transform_pin in a comp with non-square pixels, and reflections without AE 23+ track mattes. In a comp with non-square pixels the screen's aspect is worked out as the picture shows (each comp pixel its pixel aspect wide) and the square-pixel insert is pinned so it shows at that aspect. The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " + AGENT_SAFETY_GUIDANCE,
         schema: AeScreenReplaceSchema,
         handler: async (args, ctx) => {
           try {
             return await screenReplace(ctx, args);
           } catch (err) {
             if (err instanceof PlanarError) return failure(err);
+            throw err;
+          }
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/screenfg-math.ts
+function excessOf(r, g, b, dom) {
+  return dom === 1 ? g - Math.max(r, b) : b - Math.max(r, g);
+}
+function quantile2(sorted, q) {
+  if (sorted.length === 0) return NaN;
+  const pos = Math.min(sorted.length - 1, Math.max(0, q * (sorted.length - 1)));
+  const lo = Math.floor(pos);
+  const hi = Math.min(sorted.length - 1, lo + 1);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+function sortedOf(values) {
+  const a = Float32Array.from(values);
+  a.sort();
+  return a;
+}
+function maskFromAlpha(img, threshold = 128) {
+  const n = img.width * img.height;
+  const m = new Uint8Array(n);
+  for (let i = 0; i < n; i++) m[i] = img.data[i * 4 + 3] >= threshold ? 1 : 0;
+  return m;
+}
+function alphaOf2(img) {
+  const n = img.width * img.height;
+  const a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = img.data[i * 4 + 3] / 255;
+  return a;
+}
+function erode(mask, w, h, r) {
+  if (r <= 0) return mask.slice();
+  return minMax(mask, w, h, Math.round(r), true);
+}
+function minMax(mask, w, h, r, isMin) {
+  const tmp = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  const win = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    let count = 0;
+    const row = y * w;
+    for (let x = -r; x <= r; x++) if (x >= 0 && x < w) count += mask[row + x];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = isMin ? count === win ? 1 : 0 : count > 0 ? 1 : 0;
+      const add = x + r + 1;
+      const drop = x - r;
+      if (add < w) count += mask[row + add];
+      if (drop >= 0) count -= mask[row + drop];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let count = 0;
+    for (let y = -r; y <= r; y++) if (y >= 0 && y < h) count += tmp[y * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = isMin ? count === win ? 1 : 0 : count > 0 ? 1 : 0;
+      const add = y + r + 1;
+      const drop = y - r;
+      if (add < h) count += tmp[add * w + x];
+      if (drop >= 0) count -= tmp[drop * w + x];
+    }
+  }
+  return out;
+}
+function screenColourInside(frames, step3 = 2) {
+  const votes = [0, 0, 0];
+  let insideCount = 0;
+  for (const { img, inside } of frames) {
+    const d = img.data;
+    for (let y = 0; y < img.height; y += step3) {
+      for (let x = 0; x < img.width; x += step3) {
+        const i = y * img.width + x;
+        if (!inside[i]) continue;
+        insideCount++;
+        const r = d[i * 4] / 255;
+        const g = d[i * 4 + 1] / 255;
+        const b = d[i * 4 + 2] / 255;
+        const mx = Math.max(r, g, b);
+        if (mx - Math.min(r, g, b) < 0.15) continue;
+        votes[mx === g ? 1 : mx === b ? 2 : 0]++;
+      }
+    }
+  }
+  if (insideCount === 0) return null;
+  const dom = votes[1] >= votes[2] ? 1 : 2;
+  if (votes[0] > votes[dom]) return null;
+  const ex = [];
+  const rs = [];
+  const gs = [];
+  const bs = [];
+  for (const { img, inside } of frames) {
+    const d = img.data;
+    for (let y = 0; y < img.height; y += step3) {
+      for (let x = 0; x < img.width; x += step3) {
+        const i = y * img.width + x;
+        if (!inside[i]) continue;
+        const r = d[i * 4] / 255;
+        const g = d[i * 4 + 1] / 255;
+        const b = d[i * 4 + 2] / 255;
+        const e = excessOf(r, g, b, dom);
+        if (e <= 0.08) continue;
+        ex.push(e);
+        rs.push(r);
+        gs.push(g);
+        bs.push(b);
+      }
+    }
+  }
+  const coverage = ex.length / insideCount;
+  if (ex.length === 0 || coverage < 0.25) return null;
+  const p90 = quantile2(sortedOf(ex), 0.9);
+  const keepR = [];
+  const keepG = [];
+  const keepB = [];
+  for (let k = 0; k < ex.length; k++) {
+    if (ex[k] >= 0.6 * p90) {
+      keepR.push(rs[k]);
+      keepG.push(gs[k]);
+      keepB.push(bs[k]);
+    }
+  }
+  const rgb = [quantile2(sortedOf(keepR), 0.5), quantile2(sortedOf(keepG), 0.5), quantile2(sortedOf(keepB), 0.5)];
+  const excess = excessOf(rgb[0], rgb[1], rgb[2], dom);
+  if (!(excess >= 0.1)) return null;
+  return { rgb, dom, excess, pixels: keepR.length, coverage };
+}
+function classify(img, inside, key, erodePx = 3) {
+  const n = img.width * img.height;
+  const s = new Uint8Array(n);
+  const f = new Uint8Array(n);
+  const d = img.data;
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    const e = excessOf(d[i * 4] / 255, d[i * 4 + 1] / 255, d[i * 4 + 2] / 255, key.dom);
+    if (e >= 0.6 * key.excess) s[i] = 1;
+    else if (e <= 0.15 * key.excess) f[i] = 1;
+  }
+  return { screen: erode(s, img.width, img.height, Math.max(1, erodePx - 1)), fg: erode(f, img.width, img.height, erodePx) };
+}
+function clipsFrom(samples) {
+  const sv = [];
+  const fv = [];
+  for (const s of samples) {
+    for (let i = 0; i < s.alpha.length; i++) {
+      if (s.screen[i]) sv.push(s.alpha[i]);
+      else if (s.fg[i]) fv.push(s.alpha[i]);
+    }
+  }
+  const sp = sv.length ? quantile2(sortedOf(sv), 0.995) : null;
+  const fp = fv.length ? quantile2(sortedOf(fv), 5e-3) : null;
+  const black = sp === null ? 0 : clamp6(round12(sp * 100 + 2), 0, 50);
+  const white = fp === null || fv.length < MIN_FG_PX ? null : clamp6(round12(fp * 100 - 2), Math.min(100, black + 20), 100);
+  return { black, white, screen_px: sv.length, fg_px: fv.length, screen_alpha_p995: sp === null ? null : round42(sp), fg_alpha_p005: fp === null ? null : round42(fp) };
+}
+function clipAlpha(raw, black, white) {
+  const lo = black / 100;
+  const span = Math.max(1e-3, white / 100 - lo);
+  const out = new Float32Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = clamp6((raw[i] - lo) / span, 0, 1);
+  return out;
+}
+function boxPass(src, w, h, r) {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const win = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let k = -r; k <= r; k++) sum += src[row + clamp6(k, 0, w - 1)];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / win;
+      sum += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let k = -r; k <= r; k++) sum += tmp[clamp6(k, 0, h - 1) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / win;
+      sum += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+    }
+  }
+  return out;
+}
+function boxBlur3(src, w, h, r) {
+  const rr = Math.max(0, Math.round(r));
+  if (rr === 0) return src.slice();
+  return boxPass(boxPass(boxPass(src, w, h, rr), w, h, rr), w, h, rr);
+}
+function wrapMapOf(alpha, w, h, r) {
+  const inv = new Float32Array(alpha.length);
+  for (let i = 0; i < alpha.length; i++) inv[i] = 1 - alpha[i];
+  const b = boxBlur3(inv, w, h, r);
+  for (let i = 0; i < b.length; i++) b[i] *= alpha[i];
+  return b;
+}
+function windowMean(v, m, w, h, r) {
+  const W = w + 1;
+  const sv = new Float64Array(W * (h + 1));
+  const sc = new Float64Array(W * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let rv = 0;
+    let rc = 0;
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (m[i]) {
+        rv += v[i];
+        rc += 1;
+      }
+      sv[(y + 1) * W + x + 1] = sv[y * W + x + 1] + rv;
+      sc[(y + 1) * W + x + 1] = sc[y * W + x + 1] + rc;
+    }
+  }
+  const mean3 = new Float32Array(w * h);
+  const count = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r);
+    const y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r);
+      const x1 = Math.min(w, x + r + 1);
+      const c = sc[y1 * W + x1] - sc[y0 * W + x1] - sc[y1 * W + x0] + sc[y0 * W + x0];
+      const s = sv[y1 * W + x1] - sv[y0 * W + x1] - sv[y1 * W + x0] + sv[y0 * W + x0];
+      count[y * w + x] = c;
+      mean3[y * w + x] = c > 0 ? s / c : 0;
+    }
+  }
+  return { mean: mean3, count };
+}
+function screenShare(img, alpha, inside, W, key, r) {
+  const { width: w, height: h, data: d } = img;
+  const n = w * h;
+  const e = new Float32Array(n);
+  const L = new Float32Array(n);
+  const chroma = new Float32Array(n);
+  const core2 = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const R = d[i * 4] / 255;
+    const G = d[i * 4 + 1] / 255;
+    const B = d[i * 4 + 2] / 255;
+    e[i] = excessOf(R, G, B, key.dom);
+    L[i] = (R + G + B) / 3;
+    chroma[i] = L[i] > 1e-3 ? e[i] / L[i] : 0;
+    core2[i] = alpha[i] >= 0.999 && W[i] < 5e-3 && inside[i] && L[i] > 0.05 ? 1 : 0;
+  }
+  const base = windowMean(chroma, core2, w, h, 3 * r + 15);
+  const LS = (key.rgb[0] + key.rgb[1] + key.rgb[2]) / 3;
+  const k = new Float32Array(n);
+  const ok = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!inside[i] || alpha[i] <= 0.5 || W[i] <= 0.01 || base.count[i] < 10) continue;
+    const den = key.excess - base.mean[i] * LS;
+    if (!(den > 0.02)) continue;
+    k[i] = (e[i] - base.mean[i] * L[i]) / den;
+    ok[i] = 1;
+  }
+  return { k, ok };
+}
+function fitWrap(frames, key, radii) {
+  const per = [];
+  for (const r of radii) {
+    let sxy = 0;
+    let sxx = 0;
+    let syy = 0;
+    let sy = 0;
+    let n = 0;
+    for (const f of frames) {
+      const { width: w, height: h } = f.plate;
+      const W = wrapMapOf(f.alpha, w, h, r);
+      const share = screenShare(f.plate, f.alpha, f.inside, W, key, r);
+      for (let i = 0; i < w * h; i++) {
+        if (!share.ok[i]) continue;
+        const x = W[i];
+        const y = share.k[i];
+        sxy += x * y;
+        sxx += x * x;
+        syy += y * y;
+        sy += y;
+        n++;
+      }
+    }
+    if (n === 0 || sxx <= 0) continue;
+    const k = sxy / sxx;
+    const res = syy - 2 * k * sxy + k * k * sxx;
+    per.push({ radius: r, strength: k, r2: syy > 0 ? 1 - res / syy : 0, rim_px: n, sy: sy / n });
+  }
+  if (per.length === 0) return null;
+  const reachable = per.filter((p) => p.strength <= MAX_WRAP_FIT);
+  const pool = reachable.length ? reachable : [per.reduce((a, b) => b.radius > a.radius ? b : a)];
+  const best = pool.reduce((a, b) => b.r2 > a.r2 ? b : a);
+  return {
+    strength: round42(clamp6(best.strength, 0, 1)),
+    radius: best.radius,
+    r2: round42(best.r2),
+    rim_px: best.rim_px,
+    unclamped: round42(best.strength),
+    rim_screen_pct: round27(best.sy * 100),
+    per_radius: per.map((p) => ({ radius: p.radius, strength: round42(p.strength), r2: round42(p.r2), rim_px: p.rim_px }))
+  };
+}
+function swapCheck(plate, comp, alpha, inside, key, r) {
+  const { width: w, height: h } = plate;
+  const n = w * h;
+  const W = wrapMapOf(alpha, w, h, r);
+  const share = screenShare(plate, alpha, inside, W, key, r);
+  const outside = new Uint8Array(n);
+  for (let i = 0; i < n; i++) outside[i] = inside[i] && alpha[i] < 0.02 ? 1 : 0;
+  const ch = [0, 1, 2].map((c) => {
+    const v = new Float32Array(n);
+    for (let i = 0; i < n; i++) v[i] = comp.data[i * 4 + c] / 255;
+    return windowMean(v, outside, w, h, 3 * r + 15);
+  });
+  let num5 = 0;
+  let den = 0;
+  let ks = 0;
+  let m = 0;
+  for (let i = 0; i < n; i++) {
+    if (!share.ok[i] || ch[0].count[i] < 10) continue;
+    const k = share.k[i];
+    let dv = 0;
+    let vv = 0;
+    for (let c = 0; c < 3; c++) {
+      const v = k * (ch[c].mean[i] - key.rgb[c]);
+      const d = (comp.data[i * 4 + c] - plate.data[i * 4 + c]) / 255;
+      dv += d * v;
+      vv += v * v;
+    }
+    num5 += dv;
+    den += vv;
+    ks += k;
+    m++;
+  }
+  if (m === 0 || den <= 0) return null;
+  return { plate_share_pct: round27(ks / m * 100), swapped_pct: round27(num5 / den * 100), px: m };
+}
+function keyQuality(samples) {
+  let fgN = 0;
+  let fgThin = 0;
+  let shift = 0;
+  let shiftN = 0;
+  const sv = [];
+  for (const s of samples) {
+    const pd = s.plate.data;
+    const kd = s.keyed.data;
+    const n = s.plate.width * s.plate.height;
+    for (let i = 0; i < n; i++) {
+      const a = kd[i * 4 + 3] / 255;
+      if (s.screen[i]) sv.push(a);
+      else if (s.fg[i]) {
+        fgN++;
+        if (a < 0.98) fgThin++;
+        else {
+          shift += (Math.abs(kd[i * 4] - pd[i * 4]) + Math.abs(kd[i * 4 + 1] - pd[i * 4 + 1]) + Math.abs(kd[i * 4 + 2] - pd[i * 4 + 2])) / 3;
+          shiftN++;
+        }
+      }
+    }
+  }
+  return {
+    fg_see_through_pct: fgN ? round27(fgThin / fgN * 100) : null,
+    screen_left_p999: sv.length ? round42(quantile2(sortedOf(sv), 0.999)) : null,
+    fg_colour_shift_levels: shiftN ? round27(shift / shiftN) : null,
+    fg_px: fgN,
+    screen_px: sv.length
+  };
+}
+function cornerSpeed(frames, par) {
+  const v = [];
+  const at = [];
+  for (let k = 1; k < frames.length; k++) {
+    const a = frames[k - 1].corners;
+    const b = frames[k].corners;
+    if (a.length !== b.length || a.length === 0) continue;
+    let m = 0;
+    for (let c = 0; c < a.length; c++) m = Math.max(m, Math.hypot((b[c][0] - a[c][0]) * par, b[c][1] - a[c][1]));
+    v.push(m);
+    at.push(frames[k].time);
+  }
+  if (v.length === 0) return { median: 0, p90: 0, max: 0, at: null, frames: 0 };
+  const s = sortedOf(v);
+  let iMax = 0;
+  for (let k = 1; k < v.length; k++) if (v[k] > v[iMax]) iMax = k;
+  return { median: round27(quantile2(s, 0.5)), p90: round27(quantile2(s, 0.9)), max: round27(v[iMax]), at: round42(at[iMax]), frames: v.length };
+}
+function edgeBox(alpha, inside, w, h, minSide) {
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!inside[i] || alpha[i] < 0.5) continue;
+      if (alpha[i - 1] < 0.5 || alpha[i + 1] < 0.5 || alpha[i - w] < 0.5 || alpha[i + w] < 0.5) {
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return null;
+  const size = Math.min(Math.max(minSide, x1 - x0 + 1, y1 - y0 + 1), w, h);
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  return { x: clamp6(Math.round(cx - size / 2), 0, w - size), y: clamp6(Math.round(cy - size / 2), 0, h - size), size };
+}
+function cropImage3(img, x, y, cw, ch) {
+  const data = new Uint8Array(cw * ch * 4);
+  for (let yy = 0; yy < ch; yy++) {
+    const src = ((y + yy) * img.width + x) * 4;
+    data.set(img.data.subarray(src, src + cw * 4), yy * cw * 4);
+  }
+  return { width: cw, height: ch, data };
+}
+function resizeMask(mask, w, h, tw, th) {
+  if (w === tw && h === th) return mask;
+  const out = new Uint8Array(tw * th);
+  for (let y = 0; y < th; y++) {
+    const sy = Math.min(h - 1, Math.floor((y + 0.5) * h / th));
+    for (let x = 0; x < tw; x++) out[y * tw + x] = mask[sy * w + Math.min(w - 1, Math.floor((x + 0.5) * w / tw))];
+  }
+  return out;
+}
+function clamp6(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+function round12(v) {
+  return Math.round(v * 10) / 10;
+}
+function round27(v) {
+  return Math.round(v * 100) / 100;
+}
+function round42(v) {
+  return Math.round(v * 1e4) / 1e4;
+}
+var MIN_FG_PX, MAX_WRAP_FIT;
+var init_screenfg_math = __esm({
+  "src/tools/ext/screenfg-math.ts"() {
+    "use strict";
+    MIN_FG_PX = 300;
+    MAX_WRAP_FIT = 1.1;
+  }
+});
+
+// src/tools/ext/screenfg.ts
+async function queued9(ctx, label2, opId, fn) {
+  try {
+    return await ctx.queue.run(label2, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+async function readHost6(ctx, opId, tag, host, args) {
+  const res = await ctx.bridge.evalRaw({ id: `${opId}_${tag}`, script: buildJsxCall(host, args), label: `${TOOL3} ${tag}`, mutates: false, toolName: TOOL3 });
+  return res.result;
+}
+async function renderImage(ctx, opId, compId, time, index, framesDir) {
+  const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName: TOOL3 });
+  try {
+    return decodePngFile(s.path);
+  } finally {
+    fs55.rmSync(s.path, { force: true });
+  }
+}
+function isAeBlocked5(err) {
+  return err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued");
+}
+function errMessage13(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+function planTimes(given, span, fps, n) {
+  const f = fps > 0 ? fps : 25;
+  const lo = Math.max(0, span.start);
+  const hi = Math.max(lo, span.end - 1 / f);
+  const snap = (t) => Math.round(t * f) / f;
+  let out;
+  if (given && given.length) out = given.map(snap).filter((t) => t >= lo - 1e-6 && t <= hi + 1e-6);
+  else out = Array.from({ length: n }, (_, k) => snap(lo + (hi - lo) * (k + 0.5) / n));
+  return [...new Set(out.map(r410))].sort((a, b) => a - b);
+}
+function planInsertMb(mode, info, speed) {
+  if (mode === "keep") return { set: null, note: null };
+  const angle = info.comp.shutter_angle && info.comp.shutter_angle > 0 ? info.comp.shutter_angle : 180;
+  const centred = -angle / 2;
+  const f = info.insert.force_mb;
+  if (f) {
+    const phase = f.phase ?? 0;
+    const off = f.override !== 1 || Math.abs(phase - centred) > 0.5 || f.angle !== null && Math.abs(f.angle - angle) > 0.5;
+    if (!off) return { set: null, note: null };
+    const lead = speed.max > 0 && f.override === 1 ? r214(Math.abs(phase + (f.angle ?? angle) / 2) / 360 * speed.max) : null;
+    return {
+      set: { angle, phase: centred },
+      note: `CC Force Motion Blur on the insert had shutter phase ${r214(phase)} (angle ${f.angle ?? "?"}): its blur reached ${phase > centred ? "ahead of" : "behind"} the frame` + (lead !== null ? `, so the insert's blur sat up to ${lead} px off the plate's at the fastest frame` : "") + `. It now uses the comp's angle (${r214(angle)}) centred on the frame (phase ${r214(centred)}), because the track follows the middle of the plate's blur.`
+    };
+  }
+  if (info.insert.motion_blur && info.comp.motion_blur) {
+    if (info.comp.shutter_phase !== null && Math.abs(info.comp.shutter_phase - centred) > 0.5) {
+      return {
+        set: null,
+        note: `The insert uses layer motion blur with the comp's shutter phase ${r214(info.comp.shutter_phase)}; for a tracked insert it should be centred (${r214(centred)}). The comp setting was left alone because it changes every layer's blur.`
+      };
+    }
+    return { set: null, note: null };
+  }
+  if (speed.max > MB_SPEED_PX) {
+    return {
+      set: { angle, phase: centred },
+      note: `The screen moves up to ${r214(speed.max)} px a frame${speed.at !== null ? ` (at ${r214(speed.at)} s)` : ""} and the insert had no motion blur (a camera blurs anything that moves that fast): CC Force Motion Blur was added at the comp's angle (${r214(angle)}), centred on the frame (phase ${r214(centred)}).`
+    };
+  }
+  return { set: null, note: null };
+}
+function maskBox(mask, w, h, margin) {
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!mask[y * w + x]) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  const bx = Math.max(0, x0 - margin);
+  const by = Math.max(0, y0 - margin);
+  return { x: bx, y: by, w: Math.min(w, x1 + margin + 1) - bx, h: Math.min(h, y1 + margin + 1) - by };
+}
+function cropMask(m, w, b) {
+  const out = m instanceof Float32Array ? new Float32Array(b.w * b.h) : new Uint8Array(b.w * b.h);
+  for (let y = 0; y < b.h; y++) out.set(m.subarray((b.y + y) * w + b.x, (b.y + y) * w + b.x + b.w), y * b.w);
+  return out;
+}
+function expectThat2(m, ok, p, expected, actual, message) {
+  if (!ok) m.push({ path: p, expected, actual, message });
+}
+function paramOf(l, match, param) {
+  const e = l?.effects.filter((x) => x.match === match).pop();
+  return e ? e.params[param] : void 0;
+}
+function near8(a, b, tol = 1e-3) {
+  return typeof a === "number" && Math.abs(a - b) <= tol;
+}
+function nearColour(a, c, tol = 2e-3) {
+  return Array.isArray(a) && a.length >= 3 && [0, 1, 2].every((i) => Math.abs(Number(a[i]) - c[i]) <= tol);
+}
+function structureMismatches(read3, parts, grow) {
+  const m = [];
+  const L = read3.layers;
+  for (const k of ["wrap_in", "wrap_out", "wrap", "key", "area", "insert"]) expectThat2(m, !!L[k], `layers.${k}`, "present", null, `The ${k} layer is missing after the write`);
+  if (m.length) return m;
+  const order = ["wrap_in", "wrap_out", "wrap", "key", "area", "insert"].map((k) => L[k].index);
+  expectThat2(m, order.every((v, i) => i === 0 || v > order[i - 1]), "order", "wrap IN, wrap OUT, WRAP, KEY, AREA, insert (top down)", order, "The parts are not in order above the insert");
+  expectThat2(m, L.key.matte_id === parts.layers.area.id && L.key.matte_type === "alpha", "key.matte", { id: parts.layers.area.id, type: "alpha" }, { id: L.key.matte_id, type: L.key.matte_type }, "The KEY layer is not matted by the AREA's alpha");
+  for (const k of ["wrap_in", "wrap_out"]) {
+    expectThat2(m, L[k].matte_id === parts.layers.wrap.id && L[k].matte_type === "luma", `${k}.matte`, { id: parts.layers.wrap.id, type: "luma" }, { id: L[k].matte_id, type: L[k].matte_type }, `The ${k} layer is not luma-matted by WRAP`);
+  }
+  expectThat2(m, L.wrap_in.blending_mode === "add", "wrap_in.blending_mode", "add", L.wrap_in.blending_mode, "wrap IN is not in Add");
+  expectThat2(m, L.wrap_out.blending_mode === "subtract", "wrap_out.blending_mode", "subtract", L.wrap_out.blending_mode, "wrap OUT is not in Subtract");
+  expectThat2(m, L.wrap.enabled === false && L.area.enabled === false, "mattes.enabled", false, { wrap: L.wrap.enabled, area: L.area.enabled }, "A matte layer is switched on, so it shows");
+  expectThat2(m, !!read3.inner.key?.effects.some((e) => e.match === "Keylight 906"), "key.keylight", "present", null, "No Keylight in the KEY comp");
+  expectThat2(m, paramOf(read3.inner.key, "Keylight 906", "Keylight 906-0019") === 2, "key.replace_method", 2, paramOf(read3.inner.key, "Keylight 906", "Keylight 906-0019"), "Keylight's Replace Method is not Source");
+  expectThat2(m, near8(paramOf(read3.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), grow), "area.grow_px", grow, paramOf(read3.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), "The AREA's Minimax radius did not stick");
+  const wrapBlend = read3.inner.wrap.find((l) => l?.name === "alpha");
+  expectThat2(m, wrapBlend?.blending_mode === "multiply", "wrap_comp.alpha.blending_mode", "multiply", wrapBlend?.blending_mode, "The WRAP comp's alpha layer is not in Multiply");
+  return m;
+}
+function setMismatches(read3, plan2) {
+  const m = [];
+  const key = read3.inner.key;
+  const kl = plan2.keylight;
+  if (kl) {
+    const e = key?.effects.filter((x) => x.match === "Keylight 906").pop();
+    if (kl.enabled !== void 0) expectThat2(m, e?.enabled === kl.enabled, "keylight.enabled", kl.enabled, e?.enabled, "Keylight's on/off did not stick");
+    if (kl.colour) expectThat2(m, nearColour(paramOf(key, "Keylight 906", "Keylight 906-0004"), kl.colour), "keylight.colour", kl.colour, paramOf(key, "Keylight 906", "Keylight 906-0004"), "Keylight's Screen Colour did not stick");
+    if (kl.clip_black !== void 0) expectThat2(m, near8(paramOf(key, "Keylight 906", "Keylight 906-0012"), kl.clip_black, 0.01), "keylight.clip_black", kl.clip_black, paramOf(key, "Keylight 906", "Keylight 906-0012"), "Clip Black did not stick");
+    if (kl.clip_white !== void 0) expectThat2(m, near8(paramOf(key, "Keylight 906", "Keylight 906-0013"), kl.clip_white, 0.01), "keylight.clip_white", kl.clip_white, paramOf(key, "Keylight 906", "Keylight 906-0013"), "Clip White did not stick");
+  }
+  const w = plan2.wrap;
+  if (w) {
+    for (const k of ["wrap_in", "wrap_out"]) {
+      const l = read3.layers[k];
+      if (w.opacity !== void 0) expectThat2(m, near8(l?.opacity, w.opacity, 0.01), `${k}.opacity`, w.opacity, l?.opacity, `${k}'s opacity did not stick`);
+      if (w.light_radius !== void 0) expectThat2(m, near8(paramOf(l, "ADBE Box Blur2", "ADBE Box Blur2-0001"), w.light_radius, 0.01), `${k}.light_radius`, w.light_radius, paramOf(l, "ADBE Box Blur2", "ADBE Box Blur2-0001"), `${k}'s blur did not stick`);
+    }
+    if (w.colour) expectThat2(m, nearColour(paramOf(read3.layers.wrap_out, "ADBE Fill", "ADBE Fill-0002"), w.colour), "wrap_out.colour", w.colour, paramOf(read3.layers.wrap_out, "ADBE Fill", "ADBE Fill-0002"), "wrap OUT's Fill colour did not stick");
+    if (w.map_radius !== void 0) {
+      const blur = read3.inner.wrap.find((l) => l?.effects.some((e) => e.match === "ADBE Invert")) ?? null;
+      expectThat2(m, near8(paramOf(blur, "ADBE Box Blur2", "ADBE Box Blur2-0001"), w.map_radius, 0.01), "wrap_comp.map_radius", w.map_radius, paramOf(blur, "ADBE Box Blur2", "ADBE Box Blur2-0001"), "The WRAP map's blur did not stick");
+    }
+  }
+  if (plan2.grow_px !== void 0) expectThat2(m, near8(paramOf(read3.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), plan2.grow_px), "area.grow_px", plan2.grow_px, paramOf(read3.inner.area, "ADBE Minimax", "ADBE Minimax-0002"), "The AREA's Minimax radius did not stick");
+  if (plan2.insert_mb) {
+    const ins = read3.layers.insert;
+    expectThat2(m, near8(paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0005"), plan2.insert_mb.phase, 0.01), "insert.force_mb.phase", plan2.insert_mb.phase, paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0005"), "The insert's CC Force Motion Blur phase did not stick");
+    expectThat2(m, near8(paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0003"), plan2.insert_mb.angle, 0.01), "insert.force_mb.angle", plan2.insert_mb.angle, paramOf(ins, "CC Force Motion Blur", "CC Force Motion Blur-0003"), "The insert's CC Force Motion Blur angle did not stick");
+  }
+  return m;
+}
+function partsFromExisting(ex, insert) {
+  const l = ex.layers;
+  const c = ex.comps;
+  if (!l.key || !l.area || !l.wrap || !l.wrap_in || !l.wrap_out || !c.key || !c.area || !c.wrap) return null;
+  return {
+    comps: { key: c.key.id, area: c.area.id, wrap: c.wrap.id },
+    layers: {
+      wrap_in: { index: l.wrap_in.index, id: l.wrap_in.id },
+      wrap_out: { index: l.wrap_out.index, id: l.wrap_out.id },
+      wrap: { index: l.wrap.index, id: l.wrap.id },
+      key: { index: l.key.index, id: l.key.id },
+      area: { index: l.area.index, id: l.area.id },
+      insert
+    }
+  };
+}
+function readFor(args, parts) {
+  return {
+    host: "screenfgRead",
+    args: {
+      comp_id: args.comp_id,
+      layer_ids: Object.fromEntries(Object.entries(parts.layers).map(([k, v]) => [k, v.id])),
+      comps: parts.comps
+    },
+    timeoutMs: SLOW_TIMEOUT_MS
+  };
+}
+async function screenForeground(ctx, args) {
+  const opId = ctx.bridge.newOpId();
+  const framesDir = defaultFramesDir();
+  const label2 = `${TOOL3}(${args.comp_id})`;
+  const notes = [];
+  const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+  const info = await queued9(ctx, label2, opId, async () => {
+    ctx.quarantine.assertClear();
+    await verifyTargetGuard(ctx, expect, `${opId}_pre`);
+    return readHost6(ctx, opId, "info", "screenfgInfo", { comp_id: args.comp_id, insert: args.insert, ...args.plate ? { plate: args.plate } : {}, ...args.name ? { name: args.name } : {} });
+  });
+  const name = info.name;
+  const ex = info.existing;
+  const many = [...Object.entries(ex.layers), ...Object.entries(ex.comps)].filter(([, v]) => v && v.many).map(([k]) => k);
+  if (many.length) throw new PlanarError("refused", `More than one layer or comp carries the name of a part (${many.join(", ")}) for "${name}": rename the extras, or pass another name.`);
+  const insertRef = { index: info.insert.index, id: info.insert.id };
+  const existing = partsFromExisting(ex, insertRef);
+  const anyExisting = Object.values(ex.layers).some(Boolean) || Object.values(ex.comps).some(Boolean);
+  if (args.remove) {
+    if (!anyExisting) return { ok: true, applied: false, no_op: true, name, message: `No parts of ae_screen_foreground named "${name}" are in the project.` };
+    const removeParts = {
+      comps: { key: ex.comps.key?.id ?? null, area: ex.comps.area?.id ?? null, wrap: ex.comps.wrap?.id ?? null },
+      layers: Object.fromEntries(Object.entries(ex.layers).filter(([, v]) => v).map(([k, v]) => [k, { index: v.index, id: v.id }]))
+    };
+    const res = await runGuardedWrite(ctx, { toolName: TOOL3, label: `${label2} remove`, expect, compId: args.comp_id, write: { host: "screenfgApply", args: { comp_id: args.comp_id, mode: "remove", name, parts: removeParts } } });
+    const w = res;
+    return { ok: true, applied: w.no_op !== true, removed_parts: true, name, removed: w.removed ?? null, notes: ["The insert layer was left as it is, including any CC Force Motion Blur this tool added to it."], checkpoint: w.checkpoint, receipt: w.receipt };
+  }
+  if (!info.plate) throw new PlanarError("bad_args", "No plate layer was found below the insert (an enabled footage or comp layer): name it as `plate`.");
+  if (info.plate.id === info.insert.id) throw new PlanarError("bad_args", "The insert and the plate are the same layer.");
+  if (info.insert.locked) throw new PlanarError("refused", `The insert layer "${info.insert.name}" is locked; unlock it first.`);
+  if (info.plate.locked) throw new PlanarError("refused", `The plate layer "${info.plate.name}" is locked; unlock it first.`);
+  if (!info.can_set_track_matte) throw new PlanarError("refused", `The key and the wrap need layer-based track mattes (After Effects 23 or later); this is AE ${info.ae_version}.`);
+  if (!info.has_subtract) throw new PlanarError("refused", "This AE has no Subtract blending mode, which the wrap needs.");
+  if (info.plate_has_keylight) throw new PlanarError("refused", `The plate "${info.plate.name}" already has Keylight on it: the key here is made on a copy of the plate as it was shot. Turn that Keylight off, or name the unkeyed plate.`);
+  if (!existing && anyExisting) {
+    const have = [...Object.entries(ex.layers), ...Object.entries(ex.comps)].filter(([, v]) => v).map(([k]) => k);
+    throw new PlanarError("refused", `Some parts of an earlier ae_screen_foreground named "${name}" are here (${have.join(", ")}) and some are missing: call it with remove: true, then again.`);
+  }
+  if (!existing && info.insert.opacity_keyed) throw new PlanarError("refused", "The insert's Opacity is keyframed; the wrap layers copy it and set their own opacity. Remove the keys or bake them into the insert comp first.");
+  if (!info.insert.pin) notes.push("The insert has no CC Power Pin or Corner Pin: its alpha is used as the area as it is, and its speed could not be read.");
+  const comp = info.comp;
+  const par = parOf(comp.pixel_aspect);
+  const scale = comp.height / 1080;
+  const grow = args.grow_px ?? Math.max(2, Math.round(6 * scale));
+  const lightRadius = args.light_radius_px ?? Math.max(2, Math.round(8 * scale));
+  const radii = args.wrap_radius_px !== void 0 ? [args.wrap_radius_px] : [...new Set([2, 3, 4, 6].map((r) => Math.max(1, Math.round(r * scale))))];
+  const times = planTimes(args.times, { start: info.insert.in_point, end: Math.min(comp.duration, info.insert.out_point) }, comp.fps, args.max_samples);
+  if (times.length === 0) throw new PlanarError("bad_args", `None of the times falls inside the insert layer's span (${r214(info.insert.in_point)}-${r214(info.insert.out_point)} s).`);
+  const srcPar = info.insert.source_pixel_aspect > 0 ? info.insert.source_pixel_aspect : 1;
+  const speed = cornerSpeed(
+    info.insert.frames.map((f) => ({ time: f.t, corners: f.c.map((c) => [c[0] * srcPar / par + f.p[0], c[1] + f.p[1]]) })),
+    par
+  );
+  const mb = planInsertMb(args.insert_motion_blur, info, speed);
+  if (mb.note) notes.push(mb.note);
+  const budget = createRenderBudget({ maxRenders: args.max_renders, maxSeconds: args.max_seconds });
+  fs55.mkdirSync(framesDir, { recursive: true });
+  const receipts = [];
+  let checkpoint = null;
+  let parts;
+  let mode;
+  if (existing) {
+    parts = existing;
+    mode = "retuned";
+    const plan2 = { keylight: { enabled: false, clip_black: 0, clip_white: 100 }, wrap: { opacity: 0, map_radius: radii[0], light_radius: lightRadius }, grow_px: grow, insert_mb: mb.set };
+    const res = await runGuardedWrite(ctx, {
+      toolName: TOOL3,
+      label: `${label2} reset`,
+      expect,
+      compId: args.comp_id,
+      read: (phase) => phase === "before" ? null : readFor(args, parts),
+      write: { host: "screenfgApply", args: { comp_id: args.comp_id, mode: "set", parts, ...plan2 }, timeoutMs: SLOW_TIMEOUT_MS },
+      check: (_b, after) => setMismatches(after, plan2)
+    });
+    receipts.push(res.receipt);
+    checkpoint = res.checkpoint ?? null;
+  } else {
+    mode = "built";
+    const res = await runGuardedWrite(ctx, {
+      toolName: TOOL3,
+      label: `${label2} build`,
+      expect,
+      compId: args.comp_id,
+      read: (phase, written) => {
+        if (phase === "before") return null;
+        const w2 = written;
+        if (!w2?.comps || !w2.layers) return null;
+        return readFor(args, { comps: { key: w2.comps.key.id, area: w2.comps.area.id, wrap: w2.comps.wrap.id }, layers: w2.layers });
+      },
+      write: {
+        host: "screenfgApply",
+        args: {
+          comp_id: args.comp_id,
+          mode: "build",
+          name,
+          insert: insertRef,
+          plate: { index: info.plate.index, id: info.plate.id },
+          grow_px: grow,
+          map_radius: radii[0],
+          light_radius: lightRadius,
+          ...mb.set ? { insert_mb: mb.set } : {}
+        },
+        timeoutMs: SLOW_TIMEOUT_MS
+      },
+      check: (_b, after, written) => {
+        const w2 = written;
+        const p = { comps: { key: w2.comps.key.id, area: w2.comps.area.id, wrap: w2.comps.wrap.id }, layers: w2.layers };
+        return [...structureMismatches(after, p, grow), ...mb.set ? setMismatches(after, { insert_mb: mb.set }) : []];
+      }
+    });
+    const w = res;
+    parts = { comps: { key: w.comps.key.id, area: w.comps.area.id, wrap: w.comps.wrap.id }, layers: w.layers };
+    receipts.push(w.receipt);
+    checkpoint = w.checkpoint ?? null;
+  }
+  const partsOut = { comps: parts.comps, layers: parts.layers };
+  const stopped = (error, message, extra2 = {}) => ({
+    ok: false,
+    applied: true,
+    error,
+    message,
+    name,
+    mode,
+    parts: partsOut,
+    ...extra2,
+    notes,
+    checkpoint,
+    receipts,
+    how_to_remove: `Call ${TOOL3} with remove: true (same insert), or undo.`
+  });
+  try {
+    const frames = [];
+    const skipped = [];
+    await queued9(ctx, `${label2} measure`, opId, async () => {
+      let idx = 0;
+      for (const t of times) {
+        if (budget.exhausted()) break;
+        try {
+          const plate = await renderImage(ctx, `${opId}_plate`, parts.comps.key, t, idx++, framesDir);
+          budget.spend();
+          const area = await renderImage(ctx, `${opId}_area`, parts.comps.area, t, idx++, framesDir);
+          budget.spend();
+          let mask = maskFromAlpha(area, 128);
+          if (area.width !== plate.width || area.height !== plate.height) mask = resizeMask(mask, area.width, area.height, plate.width, plate.height);
+          const box = maskBox(mask, plate.width, plate.height, 0);
+          if (!box) {
+            skipped.push(`${r214(t)} s: the insert is not on screen`);
+            continue;
+          }
+          const s2 = plate.height / comp.height;
+          const inset = Math.round(grow * s2 + 0.04 * Math.min(box.w, box.h) + 2);
+          frames.push({ time: t, plate, inside: erode(mask, plate.width, plate.height, inset) });
+        } catch (err) {
+          if (isAeBlocked5(err)) throw err;
+          skipped.push(`${r214(t)} s: ${errMessage13(err)}`);
+        }
+      }
+    });
+    if (frames.length === 0) return stopped("no_frames", `No measuring frame could be rendered (${skipped.slice(0, 3).join("; ") || "render budget"}).`, { skipped });
+    let key;
+    if (args.screen_colour) {
+      const c = args.screen_colour;
+      const dom = c[2] > c[1] ? 2 : 1;
+      key = { rgb: c, dom, excess: dom === 1 ? c[1] - Math.max(c[0], c[2]) : c[2] - Math.max(c[0], c[1]), pixels: 0, coverage: 1 };
+      if (!(key.excess > 0.05)) return stopped("bad_args", `screen_colour ${JSON.stringify(c)} is not a green or blue key colour.`);
+    } else {
+      key = screenColourInside(frames.map((f) => ({ img: f.plate, inside: f.inside })));
+      if (!key) {
+        return stopped(
+          "not_a_key_screen",
+          "Inside the insert's area the plate is not mostly one green or blue key colour (under 25% of it, or too little saturation): there is nothing to key. A screen showing a picture needs a roto or a difference matte of what crosses it instead. Remove these parts with remove: true."
+        );
+      }
+    }
+    const clipsGiven = args.clip_black !== void 0 && args.clip_white !== void 0;
+    const plan2 = {
+      keylight: { enabled: true, colour: key.rgb, clip_black: clipsGiven ? args.clip_black : 0, clip_white: clipsGiven ? args.clip_white : 100 }
+    };
+    const res2 = await runGuardedWrite(ctx, {
+      toolName: TOOL3,
+      label: `${label2} key`,
+      expect,
+      compId: args.comp_id,
+      read: (phase) => phase === "before" ? null : readFor(args, parts),
+      write: { host: "screenfgApply", args: { comp_id: args.comp_id, mode: "set", parts, ...plan2 }, timeoutMs: SLOW_TIMEOUT_MS },
+      check: (_b, after) => setMismatches(after, plan2)
+    });
+    receipts.push(res2.receipt);
+    const raws = [];
+    await queued9(ctx, `${label2} matte`, opId, async () => {
+      let idx = 100;
+      for (const f of frames) {
+        if (budget.exhausted()) break;
+        const img = await renderImage(ctx, `${opId}_raw`, parts.comps.key, f.time, idx++, framesDir);
+        budget.spend();
+        raws.push(img.width === f.plate.width && img.height === f.plate.height ? alphaOf2(img) : new Float32Array(f.plate.width * f.plate.height));
+      }
+    });
+    const used = frames.slice(0, raws.length);
+    const classes = used.map((f) => classify(f.plate, f.inside, key));
+    const clipPlan = clipsFrom(used.map((f, i) => ({ alpha: raws[i], screen: classes[i].screen, fg: classes[i].fg })));
+    let clipBlack = args.clip_black ?? clipPlan.black;
+    let clipWhite = args.clip_white ?? clipPlan.white ?? DEFAULT_CLIP_WHITE;
+    if (args.clip_white === void 0 && clipPlan.white === null) {
+      notes.push(`Nothing crossed the screen on the measured frames (${clipPlan.fg_px} sure-foreground pixels), so Clip White is a default ${DEFAULT_CLIP_WHITE}. Give \`times\` where a hand or object covers part of the screen and call again.`);
+    }
+    if (clipWhite <= clipBlack + 5) {
+      notes.push(`The screen and the subject are close in Keylight's matte (Clip Black ${clipBlack}, Clip White ${clipWhite}): the subject has colours near the screen's. Check the key on the sheet.`);
+      clipWhite = Math.min(100, clipBlack + 20);
+    }
+    if (clipsGiven) {
+      clipBlack = args.clip_black;
+      clipWhite = args.clip_white;
+    }
+    const alphas = used.map((f, i) => clipsGiven ? raws[i] : clipAlpha(raws[i], clipBlack, clipWhite));
+    let wrapFit = null;
+    let strength = 0;
+    let mapRadius = radii[0];
+    if (args.wrap === "off") strength = 0;
+    else {
+      const margin = 3 * Math.max(...radii) + 16;
+      const cropped = used.flatMap((f, i) => {
+        const b = maskBox(f.inside, f.plate.width, f.plate.height, margin);
+        if (!b) return [];
+        return [{ plate: cropImage3(f.plate, b.x, b.y, b.w, b.h), alpha: cropMask(alphas[i], f.plate.width, b), inside: cropMask(f.inside, f.plate.width, b) }];
+      });
+      const s2 = used.length ? used[0].plate.height / comp.height : 1;
+      wrapFit = fitWrap(cropped, key, radii.map((r) => Math.max(1, Math.round(r * s2))));
+      if (wrapFit) mapRadius = Math.max(1, Math.round(wrapFit.radius / s2));
+      if (typeof args.wrap === "number") strength = args.wrap;
+      else if (!wrapFit) {
+        strength = DEFAULT_WRAP;
+        notes.push(`No edge of a subject was seen inside the screen on the measured frames, so the wrap strength is a default ${DEFAULT_WRAP}. Give \`times\` where something crosses the screen to fit it.`);
+      } else if (wrapFit.strength < MIN_WRAP) {
+        strength = 0;
+        notes.push(`The subject's edge shows almost none of the old screen (fitted ${wrapFit.strength}, ${wrapFit.rim_screen_pct}% of the edge), so no wrap was added.`);
+      } else {
+        strength = wrapFit.strength;
+        if (wrapFit.unclamped > 1.1) notes.push(`The edge holds more of the old screen than one wrap layer at 100% takes out (fitted ${wrapFit.unclamped} at the widest radius): some green may stay in the edge. Lower clip_white a little, or raise wrap_radius_px.`);
+      }
+    }
+    const plan3 = {
+      keylight: clipsGiven ? void 0 : { clip_black: clipBlack, clip_white: clipWhite },
+      wrap: { opacity: r214(strength * 100), colour: key.rgb, map_radius: mapRadius, light_radius: lightRadius }
+    };
+    const res3 = await runGuardedWrite(ctx, {
+      toolName: TOOL3,
+      label: `${label2} tune`,
+      expect,
+      compId: args.comp_id,
+      read: (phase) => phase === "before" ? null : readFor(args, parts),
+      write: { host: "screenfgApply", args: { comp_id: args.comp_id, mode: "set", parts, ...plan3 }, timeoutMs: SLOW_TIMEOUT_MS },
+      check: (_b, after) => setMismatches(after, plan3)
+    });
+    receipts.push(res3.receipt);
+    const order = used.map((_, i) => i).sort((a, b) => classes[b].fg.reduce((s2, v) => s2 + v, 0) - classes[a].fg.reduce((s2, v) => s2 + v, 0));
+    const pick5 = order.slice(0, Math.min(4, order.length)).sort((a, b) => a - b);
+    const finals = [];
+    await queued9(ctx, `${label2} check`, opId, async () => {
+      let idx = 200;
+      for (const i of pick5) {
+        if (budget.exhausted()) break;
+        try {
+          const keyed = await renderImage(ctx, `${opId}_keyed`, parts.comps.key, used[i].time, idx++, framesDir);
+          budget.spend();
+          const out = await renderImage(ctx, `${opId}_comp`, args.comp_id, used[i].time, idx++, framesDir);
+          budget.spend();
+          finals.push({ i, keyed, comp: out });
+        } catch (err) {
+          if (isAeBlocked5(err)) break;
+          skipped.push(`check at ${r214(used[i].time)} s: ${errMessage13(err)}`);
+        }
+      }
+    });
+    const same = (a, b) => a.width === b.width && a.height === b.height;
+    const qFrames = finals.filter((f) => same(f.keyed, used[f.i].plate));
+    const quality = qFrames.length ? keyQuality(qFrames.map((f) => ({ plate: used[f.i].plate, keyed: f.keyed, screen: classes[f.i].screen, fg: classes[f.i].fg }))) : null;
+    const s = used[0].plate.height / comp.height;
+    const rRender = Math.max(1, Math.round(mapRadius * s));
+    const rim = finals.filter((f) => same(f.comp, used[f.i].plate) && same(f.keyed, used[f.i].plate)).map((f) => {
+      const a = alphaOf2(f.keyed);
+      const sw = swapCheck(used[f.i].plate, f.comp, a, used[f.i].inside, key, rRender);
+      return { time: used[f.i].time, ...sw ?? { plate_share_pct: null, swapped_pct: null, px: 0 } };
+    });
+    if (quality && quality.fg_see_through_pct !== null && quality.fg_see_through_pct > 1) notes.push(`${quality.fg_see_through_pct}% of the subject is still see-through (matte under 0.98): lower clip_white.`);
+    if (quality && quality.screen_left_p999 !== null && quality.screen_left_p999 > 0.08) notes.push(`Some of the old screen is left over the insert (99.9th percentile matte ${quality.screen_left_p999}): raise clip_black.`);
+    if (finals.some((f) => !same(f.comp, used[f.i].plate))) notes.push("The comp renders at another resolution than the KEY comp, so the edge colour was not compared on the comp.");
+    let sheetPath;
+    if (args.contact_sheet && finals.length) {
+      const before = [];
+      const after = [];
+      for (const f of finals) {
+        const pl = used[f.i].plate;
+        if (!same(f.comp, pl) || !same(f.keyed, pl)) continue;
+        const box = edgeBox(alphaOf2(f.keyed), used[f.i].inside, pl.width, pl.height, Math.round(Math.min(pl.width, pl.height) * 0.22));
+        if (!box) continue;
+        before.push({ label: "plate", time: used[f.i].time, image: cropImage3(pl, box.x, box.y, box.size, box.size) });
+        after.push({ label: "comp", time: used[f.i].time, image: cropImage3(f.comp, box.x, box.y, box.size, box.size) });
+      }
+      const png = drawBeforeAfterSheet(before, after, args.max_size);
+      if (png) {
+        sheetPath = path52.join(framesDir, `screenforeground_${opId}.png`);
+        fs55.writeFileSync(sheetPath, encodePng(png));
+      } else notes.push("No frame showed a subject's edge inside the screen, so no sheet was made.");
+    }
+    if (skipped.length) notes.push(`Not measured: ${skipped.slice(0, 5).join("; ")}${skipped.length > 5 ? ` (+${skipped.length - 5})` : ""}.`);
+    return {
+      ok: true,
+      applied: true,
+      comp_id: args.comp_id,
+      name,
+      mode,
+      parts: partsOut,
+      key: {
+        screen_colour: key.rgb.map(r410),
+        screen_colour_8bit: key.rgb.map((v) => Math.round(v * 255)),
+        screen: key.dom === 1 ? "green" : "blue",
+        coverage: r313(key.coverage),
+        clip_black: clipBlack,
+        clip_white: clipWhite,
+        measured: clipPlan,
+        replace_method: "Source (the subject keeps the plate's colour where the clip made it solid)"
+      },
+      wrap: { strength: r410(strength), map_radius_px: mapRadius, light_radius_px: lightRadius, fit: wrapFit },
+      insert_motion_blur: { set: mb.set, speed_px_per_frame: speed },
+      check: { frames: finals.map((f) => r410(used[f.i].time)), quality, edge: rim, note: "quality is judged on pixels the plate says are surely screen or surely foreground. edge: plate_share_pct is how much of the old screen's colour the subject's edge holds over its middle (brightness aside), and swapped_pct how much of it the comp replaced with the insert's colour next to the edge (100 a full swap, under it some old screen left, over it too much)." },
+      measured_on: used.map((f) => r410(f.time)),
+      ...sheetPath ? { sheet_path: sheetPath } : {},
+      budget: { ...budget.used, max_renders: args.max_renders, max_seconds: args.max_seconds },
+      notes,
+      checkpoint,
+      receipts
+    };
+  } catch (err) {
+    return stopped(err instanceof PlanarError ? err.code : "failed", `Stopped after the parts were made: ${errMessage13(err)}`);
+  }
+}
+var fs55, path52, TOOL3, r214, r313, r410, failure2, DEFAULT_CLIP_WHITE, DEFAULT_WRAP, MIN_WRAP, MB_SPEED_PX, AeScreenForegroundSchema, screenfgTools;
+var init_screenfg = __esm({
+  "src/tools/ext/screenfg.ts"() {
+    "use strict";
+    fs55 = __toESM(require("node:fs"), 1);
+    path52 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_mutate();
+    init_render();
+    init_frames();
+    init_planar();
+    init_png_utils();
+    init_screenfg_math();
+    init_screenrep();
+    init_write_runner();
+    TOOL3 = "ae_screen_foreground";
+    r214 = (v) => Math.round(v * 100) / 100;
+    r313 = (v) => Math.round(v * 1e3) / 1e3;
+    r410 = (v) => Math.round(v * 1e4) / 1e4;
+    failure2 = (e) => ({ ok: false, error: e.code, message: e.message });
+    DEFAULT_CLIP_WHITE = 90;
+    DEFAULT_WRAP = 0.3;
+    MIN_WRAP = 0.05;
+    MB_SPEED_PX = 1.5;
+    AeScreenForegroundSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      insert: LayerSelectorSchema.describe("The insert layer ae_screen_replace made ('<name> INSERT'): the key acts only inside its alpha (grown by grow_px), and the wrap layers are copies of it."),
+      plate: LayerSelectorSchema.optional().describe("The plate layer. Default: the first enabled footage or comp layer below the insert."),
+      remove: external_exports.boolean().default(false).describe("true: take the parts of an earlier call out again (the insert is left as it is). Default false: build the parts, or re-tune them when an earlier call made them."),
+      name: external_exports.string().min(1).max(150).optional().describe("Base name of the parts ('<name> KEY', '<name> AREA', '<name> WRAP', '<name> wrap IN (new screen)', '<name> wrap OUT (old screen)'). Default: the insert layer's name without ' INSERT'."),
+      screen_colour: external_exports.array(external_exports.number().min(0).max(1)).length(3).optional().describe("The screen's key colour [r, g, b], 0..1 display values. Default: measured inside the insert's area on the plate."),
+      clip_black: external_exports.number().min(0).max(100).optional().describe("Keylight Clip Black. Default: just above the old screen's raw matte on sure-screen pixels (99.5th percentile + 2)."),
+      clip_white: external_exports.number().min(0).max(100).optional().describe("Keylight Clip White. Default: just under the subject's raw matte on sure-foreground pixels (0.5th percentile - 2); 90 when no foreground crossed the screen on the measured frames."),
+      wrap: external_exports.union([external_exports.enum(["auto", "off"]), external_exports.number().min(0).max(1)]).default("auto").describe("The edge: auto (default) fits how much the old screen bled into the subject's edge on the plate and swaps that much for the new screen; off: no wrap; a number 0..1 sets the strength."),
+      wrap_radius_px: external_exports.number().min(1).max(40).optional().describe("Fast Box Blur radius of the wrap map (how deep into the edge it reaches), comp px. Default: fitted among 2, 3, 4 and 6 px per 1080 lines."),
+      light_radius_px: external_exports.number().min(0).max(200).optional().describe("Fast Box Blur radius of the screen light (the insert blurred), comp px. Default 8 per 1080 lines."),
+      grow_px: external_exports.number().min(0).max(100).optional().describe("How far the key's area reaches beyond the insert's own alpha (Minimax), comp px. Default 6 per 1080 lines."),
+      insert_motion_blur: external_exports.enum(["auto", "keep"]).default("auto").describe("auto (default): CC Force Motion Blur on the insert, centred on the frame (phase -angle / 2, the comp's angle), when the screen moves over 1.5 px a frame and the insert has none, or when its CC Force Motion Blur is not centred; keep: leave the insert alone."),
+      times: external_exports.array(external_exports.number().min(0)).min(1).max(24).optional().describe("Seconds to measure on: frames where something crosses the screen. Default: max_samples frames spread over the insert's span."),
+      max_samples: external_exports.number().int().min(2).max(24).default(8).describe("Frames to measure on when `times` is not given. Default 8."),
+      max_renders: external_exports.number().int().min(6).max(150).default(60).describe("Most renders in the call. Default 60."),
+      max_seconds: external_exports.number().min(10).max(900).default(300).describe("Most seconds spent rendering. Default 300."),
+      contact_sheet: external_exports.boolean().default(true).describe("Write a before / after sheet of crops round the subject's edge (`sheet_path`). Default true."),
+      max_size: external_exports.number().int().min(160).max(1200).default(480).describe("Long edge of one sheet tile in pixels. Default 480."),
+      expect: ExpectSchema
+    });
+    screenfgTools = [
+      {
+        name: TOOL3,
+        description: "Keep what passes in front of a replaced green or blue screen (a hand, a finger, a pen) over the insert, after ae_screen_replace: the key, its edges, the screen's light on the subject and the insert's motion blur, measured on renders. It builds, above the insert: '<name> KEY' (a precomp of a copy of the plate with Keylight, Replace Method Source so the subject keeps the plate's colour; no Key Cleaner or Advanced Spill Suppressor), matted by '<name> AREA' (the insert's alpha grown by grow_px, so the key acts only on the screen); '<name> WRAP' (blur(1 - alpha) x alpha, the band just inside the subject's edge) as the luma matte of '<name> wrap OUT (old screen)' (the insert filled with the old screen colour, blurred, Subtract) and '<name> wrap IN (new screen)' (the insert blurred, Add). Measured, in three guarded writes with renders between: the screen colour inside the insert's area; Keylight's Clip Black and Clip White from its raw matte on pixels the plate says are surely screen or surely foreground (so the old screen is gone and the subject is not see-through); how much the old screen bled into the subject's edge on the plate, which is the wrap's strength (the fingertip then carries the new screen's light, not a green rim). insert_motion_blur auto adds CC Force Motion Blur to the insert, centred on the frame (phase -angle / 2), when the screen moves and the insert had none, and centres one that was not (its default phase 0 puts the blur ahead of the track). Calling again re-tunes the same parts; remove: true takes them out. Returns the measurements, a check on renders (see-through %, old screen left, colour shift of the subject, the edge's colour before and after) and `sheet_path`: crops round the subject's edge, plate above, comp below. Look at it. Refuses before writing on a locked insert or plate, a plate that already has Keylight, AE before 23 (layer track mattes), a keyframed insert opacity, and parts of an earlier call that are half there. If the screen turns out not to be a key colour, the parts are already made: the result says so and how to remove them. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeScreenForegroundSchema,
+        handler: async (args, ctx) => {
+          try {
+            return await screenForeground(ctx, args);
+          } catch (err) {
+            if (err instanceof PlanarError) return failure2(err);
             throw err;
           }
         }
@@ -63110,7 +64144,7 @@ function pickOpFields(v) {
 }
 function opProblems(op) {
   const out = [];
-  const bad4 = (message, path63) => out.push({ message, path: path63 });
+  const bad4 = (message, path64) => out.push({ message, path: path64 });
   const allowed = new Set(ACTION_FIELDS[op.action]);
   for (const k of ALL_OP_FIELDS) {
     if (!allowed.has(k) && op[k] !== void 0) bad4(`${k} does not apply to the ${op.action} action.`, k);
@@ -63399,7 +64433,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("true: report what would be made and every refusal, change nothing. Default false, except deep duplicates (default true)."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path63) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path63] });
+      const bad4 = (message, path64) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path64] });
       if (v.duration !== void 0 && v.duration_frames !== void 0) bad4("Give duration (seconds) or duration_frames, not both.", "duration_frames");
       if (v.bg_color !== void 0 && parseBgColor(v.bg_color) === null) bad4("bg_color must be [r, g, b] in 0..1 or '#rrggbb'.", "bg_color");
       if (v.mode === "new") {
@@ -63473,7 +64507,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("Default TRUE: report the plan and every refusal and change nothing. Pass false to apply it."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path63) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path63 });
+      const bad4 = (message, path64) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path64 });
       const flatKeys = ALL_OP_FIELDS.filter((k) => v[k] !== void 0);
       if (v.ops !== void 0) {
         if (v.action !== void 0 || flatKeys.length > 0) bad4("Give ops or a single action with its fields, not both.", ["ops"]);
@@ -63881,15 +64915,15 @@ async function runUiWrite(ctx, spec) {
       }
       const written = write.result ?? {};
       let after = null;
-      let failure2 = null;
+      let failure3 = null;
       try {
         after = await read3("after", written);
       } catch (err) {
-        failure2 = readBackMismatch(opId, "the read-back failed", err);
+        failure3 = readBackMismatch(opId, "the read-back failed", err);
       }
       let custom2 = [];
       let shown = written;
-      if (!failure2) {
+      if (!failure3) {
         try {
           custom2 = spec.check(after, written);
           shown = spec.present(before, after, written);
@@ -63898,11 +64932,11 @@ async function runUiWrite(ctx, spec) {
           shown = withPrevious(written, before);
         }
       } else {
-        custom2 = [failure2];
+        custom2 = [failure3];
         shown = withPrevious(written, before);
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-      await noteUiWrite(ctx, note, { skipRead: !!failure2 });
+      await noteUiWrite(ctx, note, { skipRead: !!failure3 });
       return { op_id: opId, applied: true, ...shown, receipt, ...sessionFields };
     });
   } catch (err) {
@@ -64433,7 +65467,7 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
   }
   if (args.action === "trim") {
     const tol = (after.frameDuration ?? 0.05) * 1.01 + 1e-6;
-    const near10 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
+    const near11 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
     for (const t of w.trims ?? []) {
       if (!w.applied_ids?.includes(t.id)) {
         const lb = byId(before, t.id);
@@ -64446,7 +65480,7 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
         ];
         for (const [field, got, was, planned] of pairs2) {
           if (got === void 0 || was === void 0) continue;
-          if (!near10(got, was) && !near10(got, planned)) {
+          if (!near11(got, was) && !near11(got, planned)) {
             m.push({ path: `layer[${la.name}].${field}`, expected: was, actual: got, message: `"${la.name}" was reported as not trimmed but its ${field} changed` });
           }
         }
@@ -64878,7 +65912,7 @@ var init_layerops = __esm({
       expect: ExpectSchema
     });
     AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
-      const bad4 = (message, path63) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path63 ? [path63] : void 0 });
+      const bad4 = (message, path64) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path64 ? [path64] : void 0 });
       const allowed = new Set(ACTION_FIELDS2[v.action]);
       for (const key of ALL_ACTION_FIELDS) {
         if (!allowed.has(key) && v[key] !== void 0) bad4(`${key} does not apply to the ${v.action} action.`, key);
@@ -65112,8 +66146,8 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
   if (!before || !after || !Array.isArray(w.targets) || w.no_op) return m;
   const find = (r, t) => r.properties.find((p) => keyOf3(p.layer_id, p.path, p.follower) === keyOf3(t.layer_id, t.path, t.follower));
   const ctx = { snap: w.snap, frame_duration: w.frame_duration, span: w.span, pivot: w.pivot };
-  const push2 = (path63, expected, actual, message) => {
-    if (m.length < MAX_MISMATCHES2) m.push({ path: path63, expected, actual, message });
+  const push2 = (path64, expected, actual, message) => {
+    if (m.length < MAX_MISMATCHES2) m.push({ path: path64, expected, actual, message });
   };
   const source = w.targets.find((t) => t.role === "source");
   for (const t of w.targets) {
@@ -65292,7 +66326,7 @@ var init_timeline = __esm({
     });
     readOf5 = (v) => v && typeof v === "object" && Array.isArray(v.properties) ? v : null;
     closeNumber = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
-    keyOf3 = (layerId, path63, follower) => `${layerId}|${path63.join("")}|${follower ?? ""}`;
+    keyOf3 = (layerId, path64, follower) => `${layerId}|${path64.join("")}|${follower ?? ""}`;
     transformTool = {
       name: "ae_keyframes_transform",
       description: "Retime keyframes without losing anything: shift (seconds or frames), scale time around a pivot, reverse, move so the first key lands at a time, or copy to another property (optionally relative to its value). Targets are {layer, path} pairs, or keys: 'selected' for the keys selected in the timeline (resolved to explicit properties and indexes; check them in the dry run). A filter narrows to a time range or key indexes. All moved keys move together as one block (a reverse mirrors the whole span, move_to puts the earliest key at the time), across every target. AE has no move-key call, so each property's keys are rebuilt: value, in and out interpolation, ease per dimension, spatial tangents, continuity, auto-bezier, roving, label and selection are kept; a reverse swaps in and out (and flips the sign of ease speed on non-spatial one-, two- and three-dimensional properties; spatial, Color and Shape speeds have no sign and stay as they are), a scale divides ease speed by the factor and keeps influence. Moved keys snap to whole frames unless snap is false. Two keys landing on one frame, a locked layer, a keyframe-less target or a property with over 500 keys are refused before anything changes. A separated Position (X/Y/Z) moves per dimension. Warns about expressions that read key(n) / nearestKey, roving keys (AE retimes those), and keys landing outside the comp. dry_run returns the planned times per key. The read-back (a separate evalScript) compares each key's time (roving keys excepted: AE retimes those), value, interpolation, eases and tangents. expect is required unless dry_run. " + AGENT_SAFETY_GUIDANCE,
@@ -65874,7 +66908,7 @@ function checkDialogEdits(m, s, before, after, written, missing) {
   if (!before?.layer_state || !after.layer_state || before.layer_state_truncated || after.layer_state_truncated) return;
   const was = layerMap2(before.layer_state);
   const now = layerMap2(after.layer_state);
-  const near10 = (a, b, tol) => Math.abs(a - b) <= tol;
+  const near11 = (a, b, tol) => Math.abs(a - b) <= tol;
   if (written.resize) {
     const moved = /* @__PURE__ */ new Map();
     for (const e of written.moved_layers ?? []) moved.set(e.id, e);
@@ -65887,9 +66921,9 @@ function checkDialogEdits(m, s, before, after, written, missing) {
       const mv = moved.get(id);
       if (mv) {
         const want = [b.position[0] + mv.dx, b.position[1] + mv.dy];
-        expectThat(m, near10(a.position[0], want[0], 0.01) && near10(a.position[1], want[1], 0.01), `layers[${id}].position`, want, a.position, "The layer did not move by the anchor shift");
+        expectThat(m, near11(a.position[0], want[0], 0.01) && near11(a.position[1], want[1], 0.01), `layers[${id}].position`, want, a.position, "The layer did not move by the anchor shift");
       } else if (!capped3) {
-        expectThat(m, near10(a.position[0], b.position[0], 0.01) && near10(a.position[1], b.position[1], 0.01), `layers[${id}].position`, b.position, a.position, "The layer moved though the resize did not move it");
+        expectThat(m, near11(a.position[0], b.position[0], 0.01) && near11(a.position[1], b.position[1], 0.01), `layers[${id}].position`, b.position, a.position, "The layer moved though the resize did not move it");
       }
     }
   }
@@ -65897,12 +66931,12 @@ function checkDialogEdits(m, s, before, after, written, missing) {
   if (change) {
     for (const e of change.extended ?? []) {
       const a = now.get(e.id);
-      if (a?.out !== void 0) expectThat(m, near10(a.out, e.to, frameTol), `layers[${e.id}].out`, e.to, a.out, "The layer's out point did not move to the new end");
+      if (a?.out !== void 0) expectThat(m, near11(a.out, e.to, frameTol), `layers[${e.id}].out`, e.to, a.out, "The layer's out point did not move to the new end");
     }
     for (const e of change.skipped ?? []) {
       const a = now.get(e.id);
       const b = was.get(e.id);
-      if (a?.out !== void 0 && b?.out !== void 0) expectThat(m, near10(a.out, b.out, frameTol), `layers[${e.id}].out`, b.out, a.out, "A layer that was meant to stay changed its out point");
+      if (a?.out !== void 0 && b?.out !== void 0) expectThat(m, near11(a.out, b.out, frameTol), `layers[${e.id}].out`, b.out, a.out, "A layer that was meant to stay changed its out point");
     }
   }
   if (written.trim) {
@@ -65910,8 +66944,8 @@ function checkDialogEdits(m, s, before, after, written, missing) {
     for (const [id, b] of was) {
       const a = now.get(id);
       if (!a) continue;
-      if (a.in !== void 0 && b.in !== void 0) expectThat(m, near10(a.in, b.in - by, frameTol), `layers[${id}].in`, rounded(b.in - by), a.in, "The layer's in point did not shift with the trim");
-      if (a.out !== void 0 && b.out !== void 0) expectThat(m, near10(a.out, b.out - by, frameTol), `layers[${id}].out`, rounded(b.out - by), a.out, "The layer's out point did not shift with the trim");
+      if (a.in !== void 0 && b.in !== void 0) expectThat(m, near11(a.in, b.in - by, frameTol), `layers[${id}].in`, rounded(b.in - by), a.in, "The layer's in point did not shift with the trim");
+      if (a.out !== void 0 && b.out !== void 0) expectThat(m, near11(a.out, b.out - by, frameTol), `layers[${id}].out`, rounded(b.out - by), a.out, "The layer's out point did not shift with the trim");
     }
   }
 }
@@ -66286,7 +67320,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs55.readFileSync(filePath, "utf8");
+  const text = fs56.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -66307,8 +67341,8 @@ function cellValue(target, cell) {
   if (target === "text") return { value: String(cell) };
   if (target === "footage") {
     const p = String(cell).trim();
-    if (!path52.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs55.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!path53.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs56.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -66475,12 +67509,12 @@ async function templateInfo(ctx, compId) {
   });
   return res.result;
 }
-var fs55, path52, DataMappingSchema, AeBuildFromDataSchema, dataTools;
+var fs56, path53, DataMappingSchema, AeBuildFromDataSchema, dataTools;
 var init_data = __esm({
   "src/tools/ext/data.ts"() {
     "use strict";
-    fs55 = __toESM(require("node:fs"), 1);
-    path52 = __toESM(require("node:path"), 1);
+    fs56 = __toESM(require("node:fs"), 1);
+    path53 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -66519,7 +67553,7 @@ var init_data = __esm({
         handler: async (args, ctx) => {
           let rows;
           if (args.data_path) {
-            if (!path52.isAbsolute(args.data_path) || !fs55.existsSync(args.data_path)) {
+            if (!path53.isAbsolute(args.data_path) || !fs56.existsSync(args.data_path)) {
               return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
             }
             try {
@@ -66607,8 +67641,8 @@ var init_data = __esm({
                 const checked = checkAfterWrite(
                   opId,
                   () => checkBuild(prepared, args.mapping, readBack.value.result.comps),
-                  (failure2) => {
-                    mismatches.push(failure2);
+                  (failure3) => {
+                    mismatches.push(failure3);
                     return null;
                   }
                 );
@@ -66772,7 +67806,7 @@ async function runEffectWrite(args, ctx, spec) {
           mismatches: spec.check(args, before.result, after.result, written),
           shown: spec.present(args, before.result, after.result, written)
         }),
-        (failure2) => ({ mismatches: [failure2], shown: written })
+        (failure3) => ({ mismatches: [failure3], shown: written })
       );
       const receipt = buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches });
       return {
@@ -66800,22 +67834,22 @@ function walkPresetsUnfiltered(folders, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries2;
       try {
-        entries2 = fs56.readdirSync(dir, { withFileTypes: true });
+        entries2 = fs57.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries2) {
-        const full = path53.join(dir, e.name);
+        const full = path54.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const rawCategory = path53.relative(folder.path, dir).split(path53.sep).join("/");
+          const rawCategory = path54.relative(folder.path, dir).split(path54.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           all.push({
             name,
             path: full,
-            category: rawCategory || path53.basename(folder.path),
+            category: rawCategory || path54.basename(folder.path),
             matchKey: `${rawCategory}/${name}`.toLowerCase(),
             source: kind
           });
@@ -66842,12 +67876,12 @@ function findPresets(folders, filter, source) {
   const presets = matched.map(({ matchKey, ...rest }) => rest);
   return { presets, scanned: cached2.scanned };
 }
-var fs56, path53, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
+var fs57, path54, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
 var init_effects = __esm({
   "src/tools/ext/effects.ts"() {
     "use strict";
-    fs56 = __toESM(require("node:fs"), 1);
-    path53 = __toESM(require("node:path"), 1);
+    fs57 = __toESM(require("node:fs"), 1);
+    path54 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -67016,12 +68050,12 @@ var init_effects = __esm({
         description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in, and (best-known route, not yet probed live) how Layer Styles get onto a layer: save the layer with the style as an .ffx preset in AE, apply it here, then edit the style with ae_set_property on ['ADBE Layer Styles', '<style>/enabled', ...]. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
         schema: AeApplyPresetSchema,
         handler: async (args, ctx) => {
-          if (!path53.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs56.existsSync(args.preset_path)) {
+          if (!path54.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs57.existsSync(args.preset_path)) {
             return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
           }
           return runEffectWrite(args, ctx, {
             toolName: "ae_apply_preset",
-            label: `ae_apply_preset(${path53.basename(args.preset_path)})`,
+            label: `ae_apply_preset(${path54.basename(args.preset_path)})`,
             host: "applyPreset",
             hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
             check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -67496,7 +68530,7 @@ function fontFileProblem(location, adobe) {
   if (!location) return { problem: "no_location", detail: "After Effects gives no file for this font." };
   let st;
   try {
-    st = fs57.statSync(location);
+    st = fs58.statSync(location);
   } catch (e) {
     const code = e.code ?? "";
     if (code === "ENOENT" || code === "ENOTDIR") return { problem: "missing", detail: "The file is not there (deleted, moved, or on a drive that is not connected)." };
@@ -67507,14 +68541,14 @@ function fontFileProblem(location, adobe) {
   let head3 = Buffer.alloc(0);
   let fd = null;
   try {
-    fd = fs57.openSync(location, "r");
+    fd = fs58.openSync(location, "r");
     const buf = Buffer.alloc(4);
-    const n = fs57.readSync(fd, buf, 0, 4, 0);
+    const n = fs58.readSync(fd, buf, 0, 4, 0);
     head3 = buf.subarray(0, n);
   } catch (e) {
     return { problem: "unreadable", detail: `The file cannot be read (${e.code ?? e.message}).` };
   } finally {
-    if (fd !== null) fs57.closeSync(fd);
+    if (fd !== null) fs58.closeSync(fd);
   }
   if (adobe !== true && /\.(ttf|otf|ttc|otc)$/i.test(location) && !FONT_SIGNATURES.some((sig) => head3.length === 4 && head3.equals(sig))) {
     return { problem: "not_a_font", detail: `The file does not start like a TrueType or OpenType font (first bytes ${head3.toString("hex") || "none"}).` };
@@ -67591,11 +68625,11 @@ async function checkFontFiles(ctx, budgetMs = FONT_SEARCH_BUDGET_MS) {
     note: total2 > 0 ? FONT_FILES_NOTE : "Every font file After Effects lists is there and readable. " + FONT_FILES_NOTE
   };
 }
-var fs57, AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm3, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, FONT_SIGNATURES, FONT_FILES_NOTE, inventoryTools;
+var fs58, AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm3, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, FONT_SIGNATURES, FONT_FILES_NOTE, inventoryTools;
 var init_inventory = __esm({
   "src/tools/ext/inventory.ts"() {
     "use strict";
-    fs57 = __toESM(require("node:fs"), 1);
+    fs58 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_queue();
@@ -67800,16 +68834,16 @@ function measureKey(before, after, screen, edge = 3) {
     }
   }
   const pct3 = (v, of) => of > 0 ? Math.round(v / of * 1e4) / 100 : 0;
-  const r410 = (v) => Math.round(v * 1e4) / 1e4;
+  const r411 = (v) => Math.round(v * 1e4) / 1e4;
   return {
     screen_pixels_pct: pct3(screenCount, n),
     subject_pixels_pct: pct3(subject, n),
     screen_left_pct: pct3(screenLeft, screenCount),
-    screen_residual_alpha: screenCount ? r410(residual / screenCount) : 0,
+    screen_residual_alpha: screenCount ? r411(residual / screenCount) : 0,
     holes_pct: pct3(holes, subject),
-    spill_before: spillN ? r410(spillB / spillN) : 0,
-    spill_after: spillN ? r410(spillA / spillN) : 0,
-    subject_color_shift: spillN ? r410(shift / spillN) : 0,
+    spill_before: spillN ? r411(spillB / spillN) : 0,
+    spill_after: spillN ? r411(spillA / spillN) : 0,
+    subject_color_shift: spillN ? r411(shift / spillN) : 0,
     recoloured_pct: pct3(recoloured, spillN)
   };
 }
@@ -67888,7 +68922,7 @@ function keyTimes(info) {
   const snap = (t) => Math.round(t * fps) / fps;
   return [.../* @__PURE__ */ new Set([snap(start), snap((start + end) / 2), snap(end)])];
 }
-async function queued9(ctx, label2, opId, fn) {
+async function queued10(ctx, label2, opId, fn) {
   try {
     return await ctx.queue.run(label2, fn);
   } catch (err) {
@@ -67896,12 +68930,12 @@ async function queued9(ctx, label2, opId, fn) {
     throw err;
   }
 }
-var fs58, path54, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs59, path55, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs58 = __toESM(require("node:fs"), 1);
-    path54 = __toESM(require("node:path"), 1);
+    fs59 = __toESM(require("node:fs"), 1);
+    path55 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -67939,7 +68973,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs58.mkdirSync(framesDir, { recursive: true });
+          fs59.mkdirSync(framesDir, { recursive: true });
           const label2 = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo2 = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -67949,7 +68983,7 @@ var init_key = __esm({
             toolName: "ae_key_greenscreen"
           })).result;
           const capture = async (t, i) => (await captureCompFrame({ ctx, opId, compId: args.comp_id, time: t, frameIndex: i, framesDir, toolName: "ae_key_greenscreen" })).path;
-          const run = await queued9(ctx, label2, opId, async () => {
+          const run = await queued10(ctx, label2, opId, async () => {
             const first = await readInfo2(args.times, "info");
             const times = args.times ?? keyTimes(first);
             const info = args.times ? first : await readInfo2(times, "info2");
@@ -68034,8 +69068,8 @@ var init_key = __esm({
           const analyse = () => {
             const kl = run.info.keylight;
             const pairs2 = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-            const previewPath = path54.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs58.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            const previewPath = path55.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+            fs59.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
             const canMeasure = below.length === 0 && pairs2.every((p) => p.before !== null) && run.screen !== null;
             const perFrame = canMeasure ? pairs2.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -68867,7 +69901,7 @@ function alignMismatches(args, afterRaw, written) {
     m.push({ path: "layers", expected: after.layers.length, actual: rects.length, message: "Some boxes could not be read back" });
     return m;
   }
-  const near10 = (a, b) => Math.abs(a - b) <= 0.5;
+  const near11 = (a, b) => Math.abs(a - b) <= 0.5;
   if (args.align) {
     const edge = {
       left: (r) => [r[0], box[0]],
@@ -68879,13 +69913,13 @@ function alignMismatches(args, afterRaw, written) {
     };
     after.layers.forEach((l, i) => {
       const [got, want] = edge[args.align](rects[i]);
-      expectThat(m, near10(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
+      expectThat(m, near11(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
     });
   } else {
     const h = args.distribute === "horizontal";
     const cs = rects.map((r) => centre(r, h)).sort((a, b) => a - b);
     const step3 = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
-    cs.forEach((c, i) => expectThat(m, near10(c, cs[0] + step3 * i), `centres[${i}]`, Math.round((cs[0] + step3 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
+    cs.forEach((c, i) => expectThat(m, near11(c, cs[0] + step3 * i), `centres[${i}]`, Math.round((cs[0] + step3 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
   }
   return m;
 }
@@ -68939,17 +69973,17 @@ function styleFindings(layers, opts) {
       if (seen.has(hex4)) continue;
       seen.add(hex4);
       if (opts.neutrals_ok && isNeutral(c.rgb)) continue;
-      const near10 = nearestBrand(c.rgb, opts.brand_colors);
-      if (near10 && near10.delta_e > opts.tolerance) {
+      const near11 = nearestBrand(c.rgb, opts.brand_colors);
+      if (near11 && near11.delta_e > opts.tolerance) {
         out.push({
           severity: "low",
           kind: "off_palette_colour",
           layer,
-          message: `"${l.name}" uses ${hex4} (${c.where}), ${near10.delta_e} delta E from the nearest brand colour ${near10.hex}.`,
+          message: `"${l.name}" uses ${hex4} (${c.where}), ${near11.delta_e} delta E from the nearest brand colour ${near11.hex}.`,
           colour: hex4,
           where: c.where,
-          nearest: near10.hex,
-          delta_e: near10.delta_e
+          nearest: near11.hex,
+          delta_e: near11.delta_e
         });
       }
     }
@@ -68961,12 +69995,12 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs59.rmdirSync(cur);
+      fs60.rmdirSync(cur);
     } catch {
       return;
     }
-    if (path55.resolve(cur) === path55.resolve(top)) return;
-    const up = path55.dirname(cur);
+    if (path56.resolve(cur) === path56.resolve(top)) return;
+    const up = path56.dirname(cur);
     if (up === cur) return;
     cur = up;
   }
@@ -69111,12 +70145,12 @@ async function reduceProjectMode(args, ctx) {
     })
   });
 }
-var fs59, path55, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
+var fs60, path56, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs59 = __toESM(require("node:fs"), 1);
-    path55 = __toESM(require("node:path"), 1);
+    fs60 = __toESM(require("node:fs"), 1);
+    path56 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -69248,8 +70282,8 @@ var init_layout = __esm({
         schema: AeExportMogrtSchema,
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
-            if (!path55.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs59.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (!path56.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
+            if (fs60.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -69257,7 +70291,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs59.mkdirSync(path55.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs60.mkdirSync(path56.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -69269,15 +70303,15 @@ var init_layout = __esm({
                 });
               } catch (err) {
                 const refused = err instanceof BridgeError && (err.kind === "evalscript_error" || err.kind === "guard");
-                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path55.dirname(args.path), createdDir);
+                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path56.dirname(args.path), createdDir);
                 throw err;
               }
               const r = res.result;
-              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path55.dirname(args.path), createdDir);
+              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path56.dirname(args.path), createdDir);
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs59.statSync(args.path);
+                  const st = fs60.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -69408,15 +70442,15 @@ var init_layout = __esm({
 function cuesFromTranscript(t) {
   let text = t.text;
   if (t.path !== void 0) {
-    if (!path56.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    if (!path57.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs60.statSync(t.path);
+      stat = fs61.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs60.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs61.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -69442,7 +70476,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
     return fresh.length;
   };
   if (!before.truncated) {
-    const lo = before.numMarkers + countFresh(near8);
+    const lo = before.numMarkers + countFresh(near9);
     const hi = before.numMarkers + countFresh((a, b) => Math.abs(a - b) <= SAME_KEY);
     expectThat(m, after.numMarkers >= lo && after.numMarkers <= hi, "numMarkers", lo === hi ? lo : `${lo}..${hi}`, after.numMarkers, "Marker count is not what adding should give");
   }
@@ -69455,7 +70489,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
   const nearest = (time) => {
     let best;
     for (const x of after.markers) {
-      if (near8(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
+      if (near9(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
     }
     return best;
   };
@@ -69517,7 +70551,7 @@ function editMarkersMismatches(beforeRaw, afterRaw, written) {
   const edited = new Set(edits.map((e) => e.index));
   const nearest = (time) => {
     let best;
-    for (const x of after.markers) if (near8(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
+    for (const x of after.markers) if (near9(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
     return best;
   };
   for (const e of edits) {
@@ -69540,7 +70574,7 @@ function editMarkersMismatches(beforeRaw, afterRaw, written) {
     if (f.params !== void 0) expectThat(m, sameParams(f.params, got.params), `${at}.params`, f.params, got.params, `Marker at ${e.to}s has other parameters`);
     for (const field of e.copy_failed ?? []) m.push({ path: `${at}.${field}`, expected: "copied", actual: "failed", message: `${field} of marker ${e.index} could not be copied, so it may have been lost` });
     for (const field of e.refused ?? []) m.push({ path: `${at}.${field}`, expected: "set", actual: "refused", message: `AE refused ${field} at ${e.to}s` });
-    if (e.moved && !edits.some((o) => o !== e && near8(o.to, e.from)) && after.markers.some((x) => near8(x.time, e.from))) {
+    if (e.moved && !edits.some((o) => o !== e && near9(o.to, e.from)) && after.markers.some((x) => near9(x.time, e.from))) {
       m.push({ path: `markers@${e.from}`, expected: "moved away", actual: "present", message: `A marker is still at ${e.from}s` });
     }
   }
@@ -69561,7 +70595,7 @@ function removeMarkersMismatches(beforeRaw, afterRaw, written) {
   const want = before.numMarkers - count;
   expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count did not drop by the number removed");
   for (const r of removed) {
-    if (after.markers.some((x) => near8(x.time, r.time) && x.comment === r.comment)) {
+    if (after.markers.some((x) => near9(x.time, r.time) && x.comment === r.comment)) {
       m.push({ path: `markers@${r.time}`, expected: "removed", actual: r.comment, message: `Marker at ${r.time}s is still there` });
     }
   }
@@ -69613,12 +70647,12 @@ async function editMarkers(args, ctx) {
     })
   });
 }
-var fs60, path56, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
+var fs61, path57, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near9, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs60 = __toESM(require("node:fs"), 1);
-    path56 = __toESM(require("node:path"), 1);
+    fs61 = __toESM(require("node:fs"), 1);
+    path57 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
     init_common();
@@ -69695,7 +70729,7 @@ var init_markers = __esm({
       message: "Say which markers: all, start/end, comment_contains, or indexes."
     });
     listOf = (v) => v && typeof v === "object" ? v : null;
-    near8 = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE2;
+    near9 = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE2;
     listRead = (compId, layer) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
     markersTools = [
       {
@@ -70359,7 +71393,7 @@ function hashFingerprint(fp) {
   return crypto20.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
 }
 function jobsPath(projectPath) {
-  return path57.join(path57.dirname(projectPath), `${path57.basename(projectPath, path57.extname(projectPath))}.jobs.json`);
+  return path58.join(path58.dirname(projectPath), `${path58.basename(projectPath, path58.extname(projectPath))}.jobs.json`);
 }
 function rememberJob(job) {
   memoryJobs.delete(job.id);
@@ -70373,7 +71407,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs61.readFileSync(file, "utf8");
+    raw = fs62.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -70383,7 +71417,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs61.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs62.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -70397,8 +71431,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs61.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs61.renameSync(tmp, file);
+    fs62.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs62.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -70770,13 +71804,13 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto20, fs61, path57, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
+var crypto20, fs62, path58, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
     crypto20 = __toESM(require("node:crypto"), 1);
-    fs61 = __toESM(require("node:fs"), 1);
-    path57 = __toESM(require("node:path"), 1);
+    fs62 = __toESM(require("node:fs"), 1);
+    path58 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -70896,7 +71930,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path58.join(defaultDataDir(), "ui");
+  return path59.join(defaultDataDir(), "ui");
 }
 function execText2(cmd, args, timeoutMs = 15e3) {
   return new Promise((resolve7) => {
@@ -70909,10 +71943,10 @@ function execText2(cmd, args, timeoutMs = 15e3) {
 }
 function pngSize(file) {
   try {
-    const fd = fs62.openSync(file, "r");
+    const fd = fs63.openSync(file, "r");
     const buf = Buffer.alloc(24);
-    fs62.readSync(fd, buf, 0, 24, 0);
-    fs62.closeSync(fd);
+    fs63.readSync(fd, buf, 0, 24, 0);
+    fs63.closeSync(fd);
     if (buf.readUInt32BE(0) !== 2303741511 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
     return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
   } catch {
@@ -70932,13 +71966,13 @@ async function captureMacMainWindow(outDir) {
     if (!info.ok || !info.window) return { ok: false, error: info.error ?? "ae_window_not_found" };
     if (info.can_record === false) return { ok: false, error: "screen_recording_permission_needed" };
     if (!info.window.onscreen) return { ok: false, error: "ae_minimized" };
-    const out = path58.join(outDir, `ae_main_${Date.now()}.png`);
+    const out = path59.join(outDir, `ae_main_${Date.now()}.png`);
     const shot = await execText2("/usr/sbin/screencapture", ["-x", "-o", "-l", String(info.window.window_id), out]);
     const size = pngSize(out);
     if (shot.ok && size) return { ok: true, path: out, width: size.width, height: size.height };
     lastError = shot.error ? `screencapture_failed: ${shot.error}` : "screencapture_failed";
     try {
-      fs62.rmSync(out, { force: true });
+      fs63.rmSync(out, { force: true });
     } catch {
     }
     if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
@@ -70992,14 +72026,14 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process3, fs62, path58, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process3, fs63, path59, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     init_win_exe();
     import_node_child_process3 = require("node:child_process");
-    fs62 = __toESM(require("node:fs"), 1);
-    path58 = __toESM(require("node:path"), 1);
+    fs63 = __toESM(require("node:fs"), 1);
+    path59 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
     init_render_gate();
@@ -71179,7 +72213,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs62.mkdirSync(outDir, { recursive: true });
+            fs63.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           if (platform === "darwin") {
@@ -71658,7 +72692,7 @@ function layoutMismatches2(plan2, args, before, after, w) {
           const now = cf.keys?.[key];
           if (was !== void 0 && now !== void 0 && was !== now) push2({ path: `copies[${cp.layer_id}].keys.${key}`, expected: was, actual: now, message: `The copied camera has another number of keys on ${key}` });
         }
-        if (sf.zoom !== void 0 && !near9(sf.zoom, cf.zoom)) push2({ path: `copies[${cp.layer_id}].zoom`, expected: sf.zoom, actual: cf.zoom, message: "The copied camera has another zoom" });
+        if (sf.zoom !== void 0 && !near10(sf.zoom, cf.zoom)) push2({ path: `copies[${cp.layer_id}].zoom`, expected: sf.zoom, actual: cf.zoom, message: "The copied camera has another zoom" });
         if (!nearList(sf.position, cf.position)) push2({ path: `copies[${cp.layer_id}].position`, expected: sf.position, actual: cf.position, message: "The copied camera has another position" });
         if (!nearList(sf.point_of_interest, cf.point_of_interest)) push2({ path: `copies[${cp.layer_id}].point_of_interest`, expected: sf.point_of_interest, actual: cf.point_of_interest, message: "The copied camera has another point of interest" });
       }
@@ -71687,11 +72721,11 @@ function layoutMismatches2(plan2, args, before, after, w) {
   if (capped3 > 0) m.push({ path: "mismatches", expected: "no more mismatches", actual: capped3, message: `${capped3} more mismatch(es) are not listed (the first ${CHECKS} are shown)` });
   return m;
 }
-async function readHost6(ctx, host, args, label2) {
+async function readHost7(ctx, host, args, label2) {
   const res = await ctx.bridge.callHost(host, args, { label: label2, mutates: false, toolName: CALL });
   return res.result;
 }
-var RectSchema, MaskRef, RegionSourceSchema, ContentSchema, RegionSchema2, CopySchema2, CreateMasterSchema, AeLayoutApplySchema, cmp, nearly, ROWS, WARNINGS_SHOWN, RECEIPT_FULL_LAYERS, readOf6, compOf2, CHECKS, near9, nearList, CAMERA_COPY_NOTE, CALL, placementTools;
+var RectSchema, MaskRef, RegionSourceSchema, ContentSchema, RegionSchema2, CopySchema2, CreateMasterSchema, AeLayoutApplySchema, cmp, nearly, ROWS, WARNINGS_SHOWN, RECEIPT_FULL_LAYERS, readOf6, compOf2, CHECKS, near10, nearList, CAMERA_COPY_NOTE, CALL, placementTools;
 var init_placement = __esm({
   "src/tools/ext/placement.ts"() {
     "use strict";
@@ -71767,8 +72801,8 @@ var init_placement = __esm({
     readOf6 = (v) => v && typeof v === "object" && Array.isArray(v.comps) ? v : null;
     compOf2 = (r, id) => r?.comps.find((c) => c.id === id);
     CHECKS = 50;
-    near9 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= 1e-3;
-    nearList = (a, b) => !a || !b || a.length === b.length && a.every((v, i) => near9(v, b[i]));
+    near10 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= 1e-3;
+    nearList = (a, b) => !a || !b || a.length === b.length && a.every((v, i) => near10(v, b[i]));
     CAMERA_COPY_NOTE = "Layer.copyToComp on a camera layer has not been measured on After Effects yet. The read-back compared, between the source and the copy, the value at time 0 of zoom, position and point of interest, how many keys each has, and one-node or two-node. Key times and values after the first, expressions, orientation and rotation, focus distance and aperture were NOT compared. Treat the copy as unverified until a live test has shown it faithful.";
     CALL = "ae_layout_apply";
     placementTools = [
@@ -71782,14 +72816,14 @@ var init_placement = __esm({
             await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
           }
           const request2 = factsRequest(args);
-          const facts = await readHost6(ctx, "layoutFacts", { ...request2, expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } }, `${CALL} (${args.dry_run ? "dry run" : "plan"})`);
+          const facts = await readHost7(ctx, "layoutFacts", { ...request2, expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } }, `${CALL} (${args.dry_run ? "dry run" : "plan"})`);
           const templates = {};
           const times = /* @__PURE__ */ new Set();
           for (const r of args.regions ?? []) if (r.from) times.add(String(r.from.time ?? args.time ?? "now"));
           if (times.size > 5) return { ok: false, error: "layout_rejected", applied: false, no_op: true, problems: [`\`from\` asks for ${times.size} different times; at most 5.`] };
           if (args.comp_id !== void 0) {
             for (const key of times) {
-              const raw = await readHost6(
+              const raw = await readHost7(
                 ctx,
                 "describeRead",
                 { comp_id: args.comp_id, layout: true, layout_time: key === "now" ? void 0 : Number(key), max_layers: 500, max_masks_per_layer: 50 },
@@ -71879,28 +72913,28 @@ function namePattern(name, sequence) {
 }
 function listDir(dir) {
   try {
-    return fs63.readdirSync(dir);
+    return fs64.readdirSync(dir);
   } catch {
     return [];
   }
 }
 function findVersions(file, sequence) {
-  const dir = path59.dirname(file);
-  const base = path59.basename(file);
+  const dir = path60.dirname(file);
+  const base = path60.basename(file);
   const own = versionToken(base);
-  const dirName = path59.basename(dir);
+  const dirName = path60.basename(dir);
   const dirTok = versionToken(dirName);
   const byVersion = /* @__PURE__ */ new Map();
   const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
   if (dirTok && sequence && (!own || own.number === dirTok.number)) {
-    const parent = path59.dirname(dir);
+    const parent = path60.dirname(dir);
     const dirRe = new RegExp(`^${escapeRe4(dirTok.before)}(\\d{1,5})${escapeRe4(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
     for (const sib of listDir(parent)) {
       const m = dirRe.exec(sib);
       if (!m) continue;
-      const ext2 = path59.extname(base).toLowerCase();
-      for (const f of listDir(path59.join(parent, sib))) {
-        if (path59.extname(f).toLowerCase() === ext2) add(Number(m[1]), path59.join(parent, sib, f));
+      const ext2 = path60.extname(base).toLowerCase();
+      for (const f of listDir(path60.join(parent, sib))) {
+        if (path60.extname(f).toLowerCase() === ext2) add(Number(m[1]), path60.join(parent, sib, f));
       }
     }
     return { current: dirTok.number, versions: firstOfEach(byVersion) };
@@ -71910,7 +72944,7 @@ function findVersions(file, sequence) {
   if (!pat) return { current: null, versions: [] };
   for (const n of listDir(dir)) {
     const m = pat.re.exec(n);
-    if (m) add(Number(m[1]), path59.join(dir, n));
+    if (m) add(Number(m[1]), path60.join(dir, n));
   }
   return { current: own.number, versions: firstOfEach(byVersion) };
 }
@@ -71925,15 +72959,15 @@ function planVersion(file, sequence, want) {
   return { current, latest, target, newer };
 }
 function versionLogPath(projectPath) {
-  const ext2 = path59.extname(projectPath);
-  return path59.join(path59.dirname(projectPath), `${path59.basename(projectPath, ext2)}.versions.json`);
+  const ext2 = path60.extname(projectPath);
+  return path60.join(path60.dirname(projectPath), `${path60.basename(projectPath, ext2)}.versions.json`);
 }
 function appendVersionLog(projectPath, entries2, notes) {
   const file = versionLogPath(projectPath);
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs63.readFileSync(file, "utf8");
+    raw = fs64.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -71948,22 +72982,22 @@ function appendVersionLog(projectPath, entries2, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs63.renameSync(file, aside);
+      fs64.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries2);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs63.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs63.renameSync(tmp, file);
+  fs64.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs64.renameSync(tmp, file);
   return file;
 }
-var fs63, path59, VERSION_RE, escapeRe4;
+var fs64, path60, VERSION_RE, escapeRe4;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs63 = __toESM(require("node:fs"), 1);
-    path59 = __toESM(require("node:path"), 1);
+    fs64 = __toESM(require("node:fs"), 1);
+    path60 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
     escapeRe4 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -72025,16 +73059,16 @@ function sameFootage(a, b, sequence) {
   const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
   return dir(a) === dir(b) && ver(a) === ver(b);
 }
-function shapeValueMismatches(want, got, path63) {
+function shapeValueMismatches(want, got, path64) {
   const m = [];
   if (!isObject(got) || !Array.isArray(got.vertices)) {
-    m.push({ path: path63, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
+    m.push({ path: path64, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
     return m;
   }
   const gotVerts = got.vertices;
   const total2 = typeof got.num_vertices === "number" ? got.num_vertices : gotVerts.length;
   if (total2 !== want.vertices.length) {
-    m.push({ path: `${path63}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
+    m.push({ path: `${path64}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
     return m;
   }
   const lists = [["vertices", want.vertices], ["inTangents", want.inTangents], ["outTangents", want.outTangents]];
@@ -72044,27 +73078,27 @@ function shapeValueMismatches(want, got, path63) {
     if (!Array.isArray(gotList)) continue;
     for (let i = 0; i < wantList.length && i < gotList.length; i++) {
       if (!closeEnough2(wantList[i][0], gotList[i][0]) || !closeEnough2(wantList[i][1], gotList[i][1])) {
-        m.push({ path: `${path63}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
+        m.push({ path: `${path64}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
         break;
       }
     }
   }
   if (want.closed !== void 0 && typeof got.closed === "boolean") {
-    expectThat(m, got.closed === want.closed, `${path63}.closed`, want.closed, got.closed, "The path's closed flag differs");
+    expectThat(m, got.closed === want.closed, `${path64}.closed`, want.closed, got.closed, "The path's closed flag differs");
   }
   return m;
 }
-function markerValueMismatches(want, got, path63) {
+function markerValueMismatches(want, got, path64) {
   const m = [];
   if (!isObject(got)) {
-    m.push({ path: path63, expected: "a marker", actual: got, message: "The marker could not be read back" });
+    m.push({ path: path64, expected: "a marker", actual: got, message: "The marker could not be read back" });
     return m;
   }
-  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path63}.comment`, want.comment, got.comment, "Marker comment differs");
-  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path63}.duration`, want.duration, got.duration, "Marker duration differs");
-  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path63}.label`, want.label, got.label, "Marker label differs");
+  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path64}.comment`, want.comment, got.comment, "Marker comment differs");
+  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path64}.duration`, want.duration, got.duration, "Marker duration differs");
+  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path64}.label`, want.label, got.label, "Marker label differs");
   for (const f of ["chapter", "url", "cuePointName"]) {
-    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path63}.${f}`, want[f], got[f], `Marker ${f} differs`);
+    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path64}.${f}`, want[f], got[f], `Marker ${f} differs`);
   }
   return m;
 }
@@ -72709,12 +73743,12 @@ function sanitizeCheckpointLabel(label2) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs64, path60, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs65, path61, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs64 = __toESM(require("node:fs"), 1);
-    path60 = __toESM(require("node:path"), 1);
+    fs65 = __toESM(require("node:fs"), 1);
+    path61 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -72879,6 +73913,7 @@ var init_receipts2 = __esm({
       "ae_patch_finish",
       "ae_screen_corners",
       "ae_screen_replace",
+      "ae_screen_foreground",
       "ae_create_comp",
       "ae_project_items",
       "ae_project_settings",
@@ -72991,7 +74026,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs64.existsSync(actualProjectPath)) {
+              if (!fs65.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -73000,16 +74035,16 @@ var init_receipts2 = __esm({
                   actual: { project_path: actualProjectPath }
                 });
               }
-              const ext2 = path60.extname(actualProjectPath) || ".aep";
-              const baseName = path60.basename(actualProjectPath, ext2);
+              const ext2 = path61.extname(actualProjectPath) || ".aep";
+              const baseName = path61.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs64.mkdirSync(checkpointDir, { recursive: true });
+              fs65.mkdirSync(checkpointDir, { recursive: true });
               const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
               const checkpointFileName = `${baseName}_${stamp3}_${safeLabel}${ext2}`;
-              const checkpointPath = path60.join(checkpointDir, checkpointFileName);
-              fs64.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs64.statSync(checkpointPath);
+              const checkpointPath = path61.join(checkpointDir, checkpointFileName);
+              fs65.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs65.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -73025,7 +74060,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs64.existsSync(checkpointPath)
+                  checkpoint_exists: fs65.existsSync(checkpointPath)
                 }
               });
               return {
@@ -73068,7 +74103,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs64.existsSync(checkpointDir)) {
+          if (!fs65.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -73076,10 +74111,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries2 = fs64.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries2 = fs65.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries2.map((e) => {
-            const fullPath = path60.join(checkpointDir, e.name);
-            const stat = fs64.statSync(fullPath);
+            const fullPath = path61.join(checkpointDir, e.name);
+            const stat = fs65.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -73132,7 +74167,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs64.existsSync(args.checkpoint_path)) {
+              if (!fs65.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -73826,6 +74861,7 @@ var init_ext = __esm({
     init_mattes();
     init_patchfit();
     init_screenrep();
+    init_screenfg();
     init_projectitems();
     init_projectsettings();
     init_view();
@@ -73939,6 +74975,7 @@ var init_ext = __esm({
       ...mattesTools,
       ...patchfitTools,
       ...screenrepTools,
+      ...screenfgTools,
       ...projectitemsTools,
       ...projectsettingsTools,
       ...viewTools,
@@ -75101,7 +76138,7 @@ function firstNonNull(promises6) {
 }
 
 // src/panel-entry.ts
-var path62 = __toESM(require("node:path"), 1);
+var path63 = __toESM(require("node:path"), 1);
 
 // src/tool-families.ts
 init_zod();
@@ -75127,7 +76164,7 @@ var FAMILIES = [
   { name: "ae_loudness", title: "Loudness: measure, then change the level.", actions: [["check", "ae_loudness_check"], ["apply", "ae_loudness_apply"]] },
   { name: "ae_stabilize", title: "Stabilizing a plate: apply from a track, or the stabilize-fix-unstabilize rig.", actions: [["apply", "ae_stabilize"], ["roundtrip", "ae_stabilize_roundtrip"]], default: "apply" },
   { name: "ae_cleanplate", title: "Clean plates for removals: pick the reference frame, build the patch rig.", actions: [["pick", "ae_cleanplate_pick"], ["setup", "ae_cleanplate_setup"]] },
-  { name: "ae_screen", title: "Screen replacement: snap the corners, replace the screen.", actions: [["corners", "ae_screen_corners"], ["replace", "ae_screen_replace"]] }
+  { name: "ae_screen", title: "Screen replacement: snap the corners, replace the screen, keep what crosses it in front.", actions: [["corners", "ae_screen_corners"], ["replace", "ae_screen_replace"], ["foreground", "ae_screen_foreground"]] }
 ];
 function ownActionField(action) {
   return `${action}_action`;
@@ -75424,9 +76461,9 @@ init_idempotency();
 init_registry();
 
 // src/usage-log.ts
-var fs65 = __toESM(require("node:fs"), 1);
+var fs66 = __toESM(require("node:fs"), 1);
 var fsp = __toESM(require("node:fs/promises"), 1);
-var path61 = __toESM(require("node:path"), 1);
+var path62 = __toESM(require("node:path"), 1);
 init_common();
 var USAGE_DIR_NAME = "usage";
 var RETENTION_MONTHS = 3;
@@ -75529,11 +76566,11 @@ function pruneOld(dir, now) {
   try {
     const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1);
     const keepFrom = monthOf(cutoff);
-    for (const name of fs65.readdirSync(dir)) {
+    for (const name of fs66.readdirSync(dir)) {
       const m = /^usage-(\d{4}-\d{2})\.jsonl$/.exec(name);
       if (m && m[1] < keepFrom) {
         try {
-          fs65.unlinkSync(path61.join(dir, name));
+          fs66.unlinkSync(path62.join(dir, name));
         } catch {
         }
       }
@@ -75553,7 +76590,7 @@ function startDrain() {
             madeDirs.add(item.dir);
             pruneOld(item.dir, item.now);
           }
-          await fsp.appendFile(path61.join(item.dir, item.file), item.text);
+          await fsp.appendFile(path62.join(item.dir, item.file), item.text);
         } catch {
           madeDirs.delete(item.dir);
         }
@@ -75602,7 +76639,7 @@ function recordUsage(ctx, entry, now = /* @__PURE__ */ new Date()) {
       return;
     }
     queue.push({
-      dir: path61.join(dataDirOf(ctx), USAGE_DIR_NAME),
+      dir: path62.join(dataDirOf(ctx), USAGE_DIR_NAME),
       file: `usage-${monthOf(now)}.jsonl`,
       text: JSON.stringify(line) + "\n",
       now
@@ -75777,11 +76814,11 @@ async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
   try {
     const output = await tool.handler(parsed.data, ctx);
     ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
-    const failure2 = resultFailureOf(output);
+    const failure3 = resultFailureOf(output);
     const waitedMs = waitedMsOf(output);
     const response = envelope(formatToolResponse(output), toolName);
     usage(
-      failure2 ? { ms: Date.now() - started, ok: true, resultOk: false, resultKind: failure2.kind, resultError: failure2.error, waitedMs } : { ms: Date.now() - started, ok: true, waitedMs },
+      failure3 ? { ms: Date.now() - started, ok: true, resultOk: false, resultKind: failure3.kind, resultError: failure3.error, waitedMs } : { ms: Date.now() - started, ok: true, waitedMs },
       extra2,
       response
     );
@@ -75947,6 +76984,7 @@ var TOOL_GROUPS = {
       "ae_caf_prep",
       "ae_screen_corners",
       "ae_screen_replace",
+      "ae_screen_foreground",
       "ae_camera_solve_check",
       "ae_color_match_element",
       "ae_matte_check"
@@ -76084,6 +77122,7 @@ var SEARCH_HINTS = {
   ae_preflight: "missing frames gaps sequence exr",
   ae_render_queue_add: "render export queue output",
   ae_screen_replace: "replace phone tv monitor screen content corner pin",
+  ae_screen_foreground: "hand finger in front of screen keep over insert green screen key light wrap spill",
   ae_track_point: "track follow motion tracker point attach",
   ae_stabilize: "stabilize shaky camera smooth",
   ae_transcribe: "speech to text subtitles whisper",
@@ -76237,9 +77276,9 @@ function fieldListOf(node) {
   add(node);
   return out;
 }
-function collapseLargeArgument(full, trimmed, path63) {
-  if (path63.split(".").length !== 2 || path63.endsWith(".expect")) return trimmed;
-  if (Object.keys(CORE_PROPERTY_CAPS).some((k) => k === path63 || k.startsWith(`${path63}.`) || k.startsWith(`${path63}[]`))) return trimmed;
+function collapseLargeArgument(full, trimmed, path64) {
+  if (path64.split(".").length !== 2 || path64.endsWith(".expect")) return trimmed;
+  if (Object.keys(CORE_PROPERTY_CAPS).some((k) => k === path64 || k.startsWith(`${path64}.`) || k.startsWith(`${path64}[]`))) return trimmed;
   if (!isJson(full) || !isJson(trimmed) || JSON.stringify(trimmed).length <= CORE_COLLAPSE_MIN_CHARS) return trimmed;
   const fields = fieldListOf(full);
   if (fields.length === 0) return trimmed;
@@ -76254,8 +77293,8 @@ function trimToolDescription(tool) {
   const body = override ?? firstSentences(stripSafety2(tool.description), TOOL_DESC_MAX);
   return `${body} ${SCHEMA_POINTER}`;
 }
-function trimSchema(node, path63 = "") {
-  if (Array.isArray(node)) return node.map((n) => trimSchema(n, path63));
+function trimSchema(node, path64 = "") {
+  if (Array.isArray(node)) return node.map((n) => trimSchema(n, path64));
   if (node === null || typeof node !== "object") return node;
   const src = node;
   const out = {};
@@ -76263,23 +77302,23 @@ function trimSchema(node, path63 = "") {
   const untyped = src.type === void 0 && src.enum === void 0 && src.properties === void 0 || itemsUntyped;
   for (const [key, value] of Object.entries(src)) {
     if (key === "description" && typeof value === "string") {
-      if (EXPECT_FIELD.test(path63)) continue;
-      const cap2 = CORE_PROPERTY_CAPS[path63];
+      if (EXPECT_FIELD.test(path64)) continue;
+      const cap2 = CORE_PROPERTY_CAPS[path64];
       const text = cap2 !== void 0 ? firstSentences(value, cap2, true) : untyped ? firstSentences(value, PROP_DESC_MAX_UNTYPED, true) : firstSentences(value, PROP_DESC_MAX);
       if (text) out.description = text;
     } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
       const props = {};
       const required = Array.isArray(src.required) ? src.required.map(String) : [];
       for (const [name, sub] of Object.entries(value)) {
-        const subPath = path63 ? `${path63}.${name}` : name;
+        const subPath = path64 ? `${path64}.${name}` : name;
         const trimmed = trimSchema(sub, subPath);
         props[name] = required.includes(name) ? trimmed : collapseLargeArgument(sub, trimmed, subPath);
       }
       out.properties = props;
     } else if (key === "items") {
-      out.items = trimSchema(value, `${path63}[]`);
+      out.items = trimSchema(value, `${path64}[]`);
     } else {
-      out[key] = trimSchema(value, path63);
+      out[key] = trimSchema(value, path64);
     }
   }
   return out;
@@ -77568,7 +78607,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue2 = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path62.join(resolvedDataDir, "quarantine.json")
+    path63.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -77582,7 +78621,7 @@ function createPanelMcp(opts) {
     queue: queue2,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path62.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path63.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo,

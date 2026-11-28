@@ -1383,6 +1383,15 @@ async function main() {
       "sp.setInterpolationTypeAtKey(1, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       "sp.setInterpolationTypeAtKey(2, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       'var ins = mk("W4 Insert", 640, 360, 2); ins.layers.addSolid([0.9, 0.2, 0.2], "Insert Fill", 640, 360, 1); ids.insert = ins.id;',
+      // ae_screen_foreground: a plate comp with a green screen that pans and a skin-coloured "hand" over its left part,
+      // placed in a comp with a null that moves like the screen (the track).
+      'var gsp = mk("W6 GS Plate", 480, 270, 2); gsp.layers.addSolid([0.08, 0.08, 0.1], "BG", 480, 270, 1);',
+      'var gss = gsp.layers.addSolid([0.38, 0.71, 0.22], "Green", 160, 90, 1); var gsq = gss.property("ADBE Transform Group").property("ADBE Position");',
+      "gsq.setValueAtTime(0, [240, 135]); gsq.setValueAtTime(0.4, [256, 141]);",
+      'var gsh = gsp.layers.addSolid([0.72, 0.55, 0.45], "Hand", 40, 120, 1); gsh.property("ADBE Transform Group").property("ADBE Position").setValue([200, 150]);',
+      'var gs = mk("W6 GS", 480, 270, 2); var gpl = gs.layers.add(gsp); gpl.name = "GS Plate"; ids.gs = gs.id;',
+      'var gref = gs.layers.addNull(2); gref.name = "GS Ref"; var grp = gref.property("ADBE Transform Group").property("ADBE Position");',
+      "grp.setValueAtTime(0, [240, 135]); grp.setValueAtTime(0.4, [256, 141]);",
       // Wave 5 fixtures.
       'var ops = mk("W5 Ops", 640, 360, 4); ids.ops = ops.id;',
       'var on = ["OpA", "OpB", "OpC", "OpD", "OpE", "OpM"];',
@@ -1683,6 +1692,32 @@ async function main() {
       check("ae_screen_replace (an insert that is the target comp is refused)", refused(r), why(r).slice(0, 120));
     } else {
       skip("ae_screen_replace", "ae_screen_corners or ae_track_read gave no corners or track to use");
+    }
+  }
+
+  // ---------- wave 7: keeping what crosses a green screen in front of the insert (ae_screen_foreground) ----------
+  {
+    const GS = WS.gs;
+    const trG = await call("ae_track_read", { comp_id: GS, source: { transform: { layer: { name: "GS Ref" } } }, preview: false });
+    check("ae_track_read (transform, for the green screen)", trG.ok === true && trG.frames >= 5, `${trG.frames} frames`);
+    const gsCorners = [[160, 90], [320, 90], [320, 180], [160, 180]];
+    r = typeof trG.track_id === "string" ? await call("ae_screen_replace", { comp_id: GS, track: { track_id: trG.track_id }, corners: gsCorners, ref_time: 0, insert: { item_id: WS.insert }, plate: { name: "GS Plate" }, name: "GS", insert_aspect: 16 / 9, match_look: false, contact_sheet: false, expect }) : { ok: false, message: "no track" };
+    check("ae_screen_replace (green screen, for the foreground)", r.applied === true && r.receipt?.matches === true, why(r));
+    if (r.applied === true) {
+      r = await call("ae_screen_foreground", { comp_id: GS, insert: { name: "GS INSERT" }, plate: { name: "GS Plate" }, max_samples: 3, expect });
+      const recOk = Array.isArray(r.receipts) && r.receipts.length === 3 && r.receipts.every((x) => x?.matches === true);
+      check(
+        "ae_screen_foreground (key, clips, wrap and sheet, measured)",
+        r.ok === true && r.applied === true && r.mode === "built" && r.key?.screen === "green" && r.key.clip_white > r.key.clip_black && recOk && (r.check?.quality?.fg_see_through_pct ?? 100) < 2 && fs.existsSync(String(r.sheet_path)),
+        `colour ${js(r.key?.screen_colour_8bit, 30)}; clips ${r.key?.clip_black}/${r.key?.clip_white}; wrap ${r.wrap?.strength} r${r.wrap?.map_radius_px}; quality ${js(r.check?.quality, 160)}; ${why(r)}`
+      );
+      // LIVE-ONLY facts to read off the result: key.measured (raw matte percentiles), wrap.fit.per_radius, check.edge.
+      r = await call("ae_screen", { action: "foreground", comp_id: GS, insert: { name: "GS INSERT" }, plate: { name: "GS Plate" }, max_samples: 2, contact_sheet: false, expect });
+      check("ae_screen (family: action foreground re-tunes the same parts)", r.ok === true && r.mode === "retuned", `${r.mode}; ${why(r)}`);
+      r = await call("ae_screen_foreground", { comp_id: GS, insert: { name: "GS INSERT" }, remove: true, expect });
+      check("ae_screen_foreground (remove: the parts taken out)", r.ok === true && r.applied === true && r.removed?.layers?.length === 5 && r.removed?.comps?.length === 3, `${js(r.removed, 160)}; ${why(r)}`);
+    } else {
+      skip("ae_screen_foreground", "ae_screen_replace made no insert on the green screen");
     }
   }
 

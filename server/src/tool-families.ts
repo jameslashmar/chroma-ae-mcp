@@ -53,7 +53,7 @@ export const FAMILIES: FamilySpec[] = [
   { name: "ae_loudness", title: "Loudness: measure, then change the level.", actions: [["check", "ae_loudness_check"], ["apply", "ae_loudness_apply"]] },
   { name: "ae_stabilize", title: "Stabilizing a plate: apply from a track, or the stabilize-fix-unstabilize rig.", actions: [["apply", "ae_stabilize"], ["roundtrip", "ae_stabilize_roundtrip"]], default: "apply" },
   { name: "ae_cleanplate", title: "Clean plates for removals: pick the reference frame, build the patch rig.", actions: [["pick", "ae_cleanplate_pick"], ["setup", "ae_cleanplate_setup"]] },
-  { name: "ae_screen", title: "Screen replacement: snap the corners, replace the screen.", actions: [["corners", "ae_screen_corners"], ["replace", "ae_screen_replace"]] },
+  { name: "ae_screen", title: "Screen replacement: snap the corners, replace the screen, keep what crosses it in front.", actions: [["corners", "ae_screen_corners"], ["replace", "ae_screen_replace"], ["foreground", "ae_screen_foreground"]] },
 ];
 
 export interface FamilyTool extends ToolDefinition<any> {

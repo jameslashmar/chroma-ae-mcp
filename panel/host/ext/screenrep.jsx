@@ -878,6 +878,30 @@
           try {
             addEffect(comp, layer, FORCE_BLUR_MATCH, "motion_blur");
             mbOut.force_effect_index = lastEffectOf(layer, FORCE_BLUR_MATCH).propertyIndex;
+            // Centred on the frame: the track follows the middle of the plate's blur, and the
+            // effect's own default phase 0 puts the blur half a shutter ahead of it.
+            var mbAngle = 180;
+            try {
+              if (Number(comp.shutterAngle) > 0) mbAngle = Number(comp.shutterAngle);
+            } catch (eSa) {
+              mbAngle = 180;
+            }
+            var fbFx = lastEffectOf(layer, FORCE_BLUR_MATCH);
+            var shutter = [["CC Force Motion Blur-0002", 1], ["CC Force Motion Blur-0003", mbAngle], ["CC Force Motion Blur-0005", -mbAngle / 2]];
+            var shutterSet = true;
+            for (var si = 0; si < shutter.length; si++) {
+              var sp = null;
+              try {
+                sp = fbFx.property(shutter[si][0]);
+              } catch (eSp) {
+                sp = null;
+              }
+              if (sp) sp.setValue(shutter[si][1]);
+              else shutterSet = false;
+              fbFx = lastEffectOf(layer, FORCE_BLUR_MATCH);
+            }
+            mbOut.shutter = shutterSet ? { angle: mbAngle, phase: -mbAngle / 2 } : null;
+            if (!shutterSet) look_skipped.push({ step: "force_motion_blur_shutter", reason: "CC Force Motion Blur's shutter parameters were not found: its blur may not be centred on the frame" });
           } catch (eFb) {
             look_skipped.push({ step: "force_motion_blur", reason: "CC Force Motion Blur could not be added: " + String(eFb.message || eFb) });
             dropEffect(layer, FORCE_BLUR_MATCH);
